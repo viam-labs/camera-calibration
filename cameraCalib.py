@@ -86,13 +86,13 @@ fx, fy, height, ppx, ppy, width = mtx[0][0], mtx[1][1], h, mtx[0][2], mtx[1][2],
 rk1, rk2, tp1, tp2, rk3 = dist[0]
 print(
     f'\n'
-    f'"camera_parameters": {{\n'
+    f'"intrinsic_parameters": {{\n'
     f'   "fx": {fx},\n'
     f'   "fy": {fy},\n'
-    f'   "height": {height},\n'
+    f'   "height_px": {height},\n'
     f'   "ppx": {ppx},\n'
     f'   "ppy": {ppy},\n'
-    f'   "width": {width}\n'
+    f'   "width_px": {width}\n'
     f' }},\n'
     f' "distortion_parameters": {{\n'
     f'   "rk1": {rk1},\n'
