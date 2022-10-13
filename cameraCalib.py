@@ -26,7 +26,7 @@ imgPointsArray = []
 
 # Loop over the image files
 print("reading images from directory "+sys.argv[1])
-for path in glob.glob(sys.argv[1]+'/*.jpg'):
+for path in glob.glob(sys.argv[1]+'/*.jp*g'):
     print("reading image "+path)
     # Load the image and convert it to gray scale
     img = cv2.imread(path)
