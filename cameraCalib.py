@@ -71,7 +71,7 @@ for i in range(len(objectPointsArray)):
 print("Total error: ", error / len(objectPointsArray))
 
 # Load one of the test images
-one_file = random.choice(glob.glob(sys.argv[1]+"/*.jpg"))
+one_file = random.choice(glob.glob(sys.argv[1]+"/*.jp*g"))
 img = cv2.imread(one_file)
 h, w = img.shape[:2]
 
