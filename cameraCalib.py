@@ -9,12 +9,13 @@ import glob
 import sys
 import random
 
-# Define the chess board rows and columns
+# Define the chess board rows and columns, and length of the square side
 rows = 8
 cols = 6
+square_length_mm = 30.
 
 # Set the termination criteria for the corner sub-pixel algorithm
-criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 30, 0.001)
+criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, square_length_mm, 0.001)
 
 # Prepare the object points: (0,0,0), (1,0,0), (2,0,0), ..., (6,5,0). They are the same for all images
 objectPoints = np.zeros((rows * cols, 3), np.float32)
