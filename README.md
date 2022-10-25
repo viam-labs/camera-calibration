@@ -3,6 +3,14 @@ Calibrate a camera and extract the intrinsic and distortion parameters.
 
 Original script and more info can be found [here](https://docs.opencv.org/3.0-beta/doc/py_tutorials/py_calib3d/py_calibration/py_calibration.html).
 
+## Prerequisites
+
+Functions from [OpenCV](https://opencv.org/) are used to do the calibration. The script will also need [numpy](https://numpy.org/) to do image processing.
+```
+$ pip install numpy
+$ pip install opencv-python
+```
+
 ## Instructions
 1. Print out the [checkerboard](./Checkerboard-A4-25mm-8x6.pdf) and attach it to a flat surface that doesn't distort the checkerboard.
 2. Take images of the checkerboard with your camera from various angles and distances.
