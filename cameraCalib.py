@@ -45,7 +45,7 @@ if len(imagesToParse) == 0:
     print('Unable to find any jpeg images in the passed directory. ')
     sys.exit()
 
-for (index,path) in enumerate(imagesToParse):
+for (index, path) in enumerate(imagesToParse):
     print(f"Reading image: {path} ({index+1}/{len(imagesToParse)})")
     # Load the image and convert it to gray scale
     img = cv2.imread(path)
