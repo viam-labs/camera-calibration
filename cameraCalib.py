@@ -9,7 +9,7 @@ import glob
 import sys
 import random
 
-noGui = '--no-gui' in sys.argv
+showGui = not ('--no-gui' in sys.argv)
 imagesBasePath = sys.argv[-1]
 
 # imagesBasePath ending with '.py' implies that the user did not pass any arguments
@@ -42,7 +42,7 @@ print(f"Reading images from directory: {imagesBasePath}")
 imagesToParse = glob.glob(imagesBasePath+'/*.jp*g')
 
 if len(imagesToParse) == 0:
-    print('Unable to find any jpeg images in the passed directory. ')
+    print('Unable to find any jpeg images in the passed directory.')
     sys.exit()
 
 for (index, path) in enumerate(imagesToParse):
@@ -62,11 +62,11 @@ for (index, path) in enumerate(imagesToParse):
         # Add the object points and the image points to the arrays
         objectPointsArray.append(objectPoints)
         imgPointsArray.append(corners)
-        if not noGui:
+        if showGui:
             # Draw the corners on the image
             cv2.drawChessboardCorners(img, (rows, cols), corners, ret)
 
-    if not noGui:
+    if showGui:
         # Display the image
         cv2.imshow('chess board', img)
         cv2.waitKey(500)
@@ -124,7 +124,7 @@ print(
 )
 
 # Display the final result
-if not noGui:
+if showGui:
     print('Showing original vs undistorted image')
     print('Press \'0\' to close the window')
     cv2.imshow('chess board', np.hstack((img, undistortedImg)))
