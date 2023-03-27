@@ -9,6 +9,16 @@ import glob
 import sys
 import random
 
+showGui = not ('--no-gui' in sys.argv)
+imagesBasePath = sys.argv[-1]
+
+# imagesBasePath ending with '.py' implies that the user did not pass any arguments
+if '--help' in sys.argv or imagesBasePath.endswith('.py'):
+    print('Usage: python cameraCalib.py [--no-gui] images_path')
+    print('  --no-gui: disable OpenCV GUI (may be required on Linux systems with GTK)')
+    print('  images_path: path to directory containing calibration images')
+    sys.exit()
+
 # Define the chess board rows and columns
 rows = 8
 cols = 6
@@ -24,10 +34,19 @@ objectPoints[:, :2] = np.mgrid[0:rows, 0:cols].T.reshape(-1, 2)
 objectPointsArray = []
 imgPointsArray = []
 
+# Save the grayscale version of the last image
+gray = None
+
 # Loop over the image files
-print("reading images from directory "+sys.argv[1])
-for path in glob.glob(sys.argv[1]+'/*.jp*g'):
-    print("reading image "+path)
+print(f"Reading images from directory: {imagesBasePath}")
+imagesToParse = glob.glob(imagesBasePath+'/*.jp*g')
+
+if len(imagesToParse) == 0:
+    print('Unable to find any jpeg images in the passed directory.')
+    sys.exit()
+
+for (index, path) in enumerate(imagesToParse):
+    print(f"Reading image: {path} ({index+1}/{len(imagesToParse)})")
     # Load the image and convert it to gray scale
     img = cv2.imread(path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -43,17 +62,18 @@ for path in glob.glob(sys.argv[1]+'/*.jp*g'):
         # Add the object points and the image points to the arrays
         objectPointsArray.append(objectPoints)
         imgPointsArray.append(corners)
+        if showGui:
+            # Draw the corners on the image
+            cv2.drawChessboardCorners(img, (rows, cols), corners, ret)
 
-        # Draw the corners on the image
-        cv2.drawChessboardCorners(img, (rows, cols), corners, ret)
-
-    # Display the image
-    cv2.imshow('chess board', img)
-    cv2.waitKey(500)
+    if showGui:
+        # Display the image
+        cv2.imshow('chess board', img)
+        cv2.waitKey(500)
 
 # Calibrate the camera and save the results
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objectPointsArray, imgPointsArray, gray.shape[::-1], None, None)
-np.savez(sys.argv[1]+'/calib_data.npz', mtx=mtx, dist=dist, rvecs=rvecs, tvecs=tvecs)
+np.savez(imagesBasePath+'/calib_data.npz', mtx=mtx, dist=dist, rvecs=rvecs, tvecs=tvecs)
 print("ret", ret)
 print("mtx", mtx)
 print("dist", dist)
@@ -71,7 +91,7 @@ for i in range(len(objectPointsArray)):
 print("Total error: ", error / len(objectPointsArray))
 
 # Load one of the test images
-one_file = random.choice(glob.glob(sys.argv[1]+"/*.jp*g"))
+one_file = random.choice(imagesToParse)
 img = cv2.imread(one_file)
 h, w = img.shape[:2]
 
@@ -104,6 +124,9 @@ print(
 )
 
 # Display the final result
-cv2.imshow('chess board', np.hstack((img, undistortedImg)))
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+if showGui:
+    print('Showing original vs undistorted image')
+    print('Press \'0\' to close the window')
+    cv2.imshow('chess board', np.hstack((img, undistortedImg)))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()

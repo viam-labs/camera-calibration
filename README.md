@@ -19,6 +19,8 @@ $ pip install opencv-python
 3. Run `python3 cameraCalib.py YOUR_PICTURES_DIRECTORY`
 4. Copy-paste the `intrinsic_parameters` and `distortion_parameters` into your rdk config.
 
+Note: On Linux with GTK you may have to run the script with the `--no-gui` flag. Ex: `python3 cameraCalib.py --no-gui YOUR_PICTURES_DIRECTORY`
+
 ### Example images
 ![alt text](ExampleImages.png "Example images")
 
