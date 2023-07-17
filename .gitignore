@@ -1,3 +1,13 @@
 .DS_Store
 *.swp
 *.npz
+
+# python virtual environments
+venv
+.venv
+.env
+__pycache__/
+*.py[cod]
+
+# tmp
+tmp
