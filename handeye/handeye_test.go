@@ -13,31 +13,42 @@ import (
 	"go.viam.com/test"
 )
 
+func validCfg() Config {
+	return Config{
+		Arm:         "arm",
+		PoseTracker: "tracker",
+		NumPoses:    20,
+		WorkspaceBounds: WorkspaceBounds{
+			X: AxisBounds{Min: -200, Max: 200},
+			Y: AxisBounds{Min: -200, Max: 200},
+			Z: AxisBounds{Min: 100, Max: 500},
+		},
+		SettleSeconds: 2.0,
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     Config
+		mutate  func(*Config)
 		wantErr string
 	}{
-		{
-			name:    "missing arm",
-			cfg:     Config{PoseTracker: "tracker"},
-			wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`,
-		},
-		{
-			name:    "missing pose_tracker",
-			cfg:     Config{Arm: "arm"},
-			wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`,
-		},
-		{
-			name:    "valid",
-			cfg:     Config{Arm: "arm", PoseTracker: "tracker"},
-			wantErr: "",
-		},
+		{name: "valid", mutate: func(_ *Config) {}, wantErr: ""},
+		{name: "missing arm", mutate: func(c *Config) { c.Arm = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`},
+		{name: "missing pose_tracker", mutate: func(c *Config) { c.PoseTracker = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`},
+		{name: "num_poses too small", mutate: func(c *Config) { c.NumPoses = 2 }, wantErr: "num_poses must be >= 3, got 2"},
+		{name: "num_poses unset defaults to 20", mutate: func(c *Config) { c.NumPoses = 0 }, wantErr: ""},
+		{name: "workspace_bounds x invalid", mutate: func(c *Config) { c.WorkspaceBounds.X = AxisBounds{Min: 100, Max: 100} }, wantErr: "workspace_bounds.x.min (100) must be < max (100)"},
+		{name: "workspace_bounds y inverted", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{Min: 200, Max: 100} }, wantErr: "workspace_bounds.y.min (200) must be < max (100)"},
+		{name: "workspace_bounds z zero", mutate: func(c *Config) { c.WorkspaceBounds.Z = AxisBounds{} }, wantErr: "workspace_bounds.z.min (0) must be < max (0)"},
+		{name: "settle_seconds unset defaults to 2", mutate: func(c *Config) { c.SettleSeconds = 0 }, wantErr: ""},
+		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be > 0, got -1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := tt.cfg.Validate("test")
+			cfg := validCfg()
+			tt.mutate(&cfg)
+			_, _, err := cfg.Validate("test")
 			if tt.wantErr == "" {
 				test.That(t, err, test.ShouldBeNil)
 				return
