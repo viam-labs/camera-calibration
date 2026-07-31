@@ -11,3 +11,6 @@ __pycache__/
 
 # tmp
 tmp
+
+# local docs and research cache (not part of the module)
+docs
