@@ -1,4 +1,9 @@
-"""ChArUco corner detection. Impl + thin CLI wrapper (see detect.py)."""
+#!/usr/bin/env python3
+"""ChArUco corner detection. Runnable as a CLI for pyrunner."""
+
+import json
+import sys
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -83,3 +88,25 @@ def detect(
         corners.append({"id": cid, "x": float(cx), "y": float(cy)})
 
     return {"num_detected": len(corners), "corners": corners}
+
+
+def main() -> None:
+    if len(sys.argv) != 7:
+        sys.stderr.write(
+            "usage: detect.py <image_path> <dictionary> <squares_x> "
+            "<squares_y> <square_length_mm> <marker_length_mm>\n"
+        )
+        sys.exit(2)
+    result = detect(
+        Path(sys.argv[1]).read_bytes(),
+        sys.argv[2],
+        int(sys.argv[3]),
+        int(sys.argv[4]),
+        float(sys.argv[5]),
+        float(sys.argv[6]),
+    )
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

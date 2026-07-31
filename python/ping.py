@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Ping CLI. Thin wrapper: calls ping_impl.ping() and prints as JSON."""
+"""Ping script used by pyrunner tests to verify Go->Python invocation."""
 
 import json
+import os
 import sys
 
-from ping_impl import ping
+
+def ping() -> dict:
+    return {"ok": True, "pid": os.getpid()}
 
 
 def main() -> None:

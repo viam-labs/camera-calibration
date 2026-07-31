@@ -1,10 +1,10 @@
-"""Tests for detect_impl.detect."""
+"""Tests for detect.detect."""
 
 import cv2
 import pytest
 from cv2 import aruco
 
-from detect_impl import detect
+from detect import detect
 
 _DICT = "DICT_5X5_100"
 _SQUARES_X = 7
