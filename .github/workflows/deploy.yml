@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Setup Python venv
+        run: make venv
+
+      - name: Test
+        run: make test
+
+      - name: Build module tarball
+        run: make module.tar.gz
+
+      - name: Install viam CLI
+        run: |
+          curl -sSL https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-latest-linux-amd64 -o viam
+          chmod +x viam
+          sudo mv viam /usr/local/bin/viam
+
+      - name: Upload to Viam registry
+        env:
+          VIAM_API_KEY_ID: ${{ secrets.VIAM_API_KEY_ID }}
+          VIAM_API_KEY: ${{ secrets.VIAM_API_KEY }}
+        run: |
+          viam login api-key --key-id "$VIAM_API_KEY_ID" --key "$VIAM_API_KEY"
+          VERSION="${GITHUB_REF_NAME#v}"
+          viam module upload --version="$VERSION" --platform=linux/amd64 module.tar.gz

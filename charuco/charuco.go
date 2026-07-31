@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 
 	"github.com/golang/geo/r3"
@@ -129,17 +128,20 @@ func newCharuco(
 		return nil, fmt.Errorf("charuco: get camera dep %q: %w", cfg.Camera, err)
 	}
 
-	// Dev-mode path resolution: anchor to this source file, walk up to repo root.
-	// Deployment (PyInstaller) will use a different resolution — separate PR.
-	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Dir(filepath.Dir(thisFile))
+	// Module root is the parent of exeDir (bin/ lives inside module root).
+	// Works uniformly in dev (repo root) and deployment (unpacked tarball).
+	exePath, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("charuco: resolve executable path: %w", err)
+	}
+	moduleRoot := filepath.Dir(filepath.Dir(exePath))
 	return &charuco{
 		name:       conf.ResourceName(),
 		logger:     logger,
 		cfg:        cfg,
 		camera:     cam,
-		pythonBin:  filepath.Join(repoRoot, ".venv", "bin", "python"),
-		scriptPath: filepath.Join(repoRoot, "python", "detect.py"),
+		pythonBin:  filepath.Join(moduleRoot, ".venv", "bin", "python"),
+		scriptPath: filepath.Join(moduleRoot, "python", "detect.py"),
 	}, nil
 }
 

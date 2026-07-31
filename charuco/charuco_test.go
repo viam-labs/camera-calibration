@@ -36,7 +36,7 @@ func zeroDistortion() *transform.BrownConrady {
 	return &transform.BrownConrady{}
 }
 
-func cameraWithIntrinsics(t *testing.T) *inject.Camera {
+func cameraWithIntrinsics() *inject.Camera {
 	cam := &inject.Camera{}
 	cam.PropertiesFunc = func(_ context.Context) (camera.Properties, error) {
 		return camera.Properties{
@@ -81,7 +81,7 @@ func TestConfigValidate(t *testing.T) {
 func TestNewCharucoResolvesCamera(t *testing.T) {
 	cfg := validCfg()
 	deps := resource.Dependencies{
-		camera.Named(cfg.Camera): cameraWithIntrinsics(t),
+		camera.Named(cfg.Camera): cameraWithIntrinsics(),
 	}
 	conf := resource.Config{
 		Name:                "test-charuco",
@@ -96,7 +96,7 @@ func TestNewCharucoResolvesCamera(t *testing.T) {
 func TestIntrinsicsJSON(t *testing.T) {
 	c := &charuco{
 		cfg:    &Config{Camera: "cam"},
-		camera: cameraWithIntrinsics(t),
+		camera: cameraWithIntrinsics(),
 	}
 	got, err := c.intrinsicsJSON(context.Background())
 	test.That(t, err, test.ShouldBeNil)
