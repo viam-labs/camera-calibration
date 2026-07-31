@@ -30,7 +30,7 @@ python-test:
 	.venv/bin/pytest python/ -v
 
 module.tar.gz: build
-	tar czf module.tar.gz $(BIN_DIR)/$(BINARY) meta.json first_run.sh
+	tar czf module.tar.gz $(BIN_DIR)/$(BINARY) meta.json first_run.sh python requirements.txt
 	@echo "Created module.tar.gz"
 
 clean:

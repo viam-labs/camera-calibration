@@ -1,6 +1,16 @@
 #!/bin/bash
-# Runs once when the module is installed on a target machine. Currently
-# a no-op — no system-level dependencies required yet. When the nonlinear
-# solver lands (needs libnlopt, for example), install commands go here.
+# Runs once when the module is installed on a target machine. Installs uv,
+# creates the Python venv, installs Python dependencies.
 
 set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if ! command -v uv >/dev/null && [ ! -x "$HOME/.local/bin/uv" ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+
+UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
+
+"$UV" venv --python=3.10 .venv --clear
+"$UV" pip install --python .venv/bin/python -r requirements.txt
