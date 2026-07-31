@@ -14,3 +14,15 @@ tmp
 
 # local docs and research cache (not part of the module)
 docs
+
+# go build output
+bin
+*.exe
+
+# packaged module
+module.tar.gz
+
+# python build output
+dist
+build
+*.egg-info

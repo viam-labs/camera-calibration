@@ -1,0 +1,35 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:camera-calibration",
+  "visibility": "public",
+  "url": "https://github.com/viam-labs/camera-calibration",
+  "description": "Camera calibration for robotic arms.",
+  "models": [
+    {
+      "api": "rdk:component:pose_tracker",
+      "model": "viam:camera-calibration:charuco",
+      "short_description": "ChArUco board pose tracker.",
+      "markdown_link": "README.md#viamcamera-calibrationcharuco"
+    },
+    {
+      "api": "rdk:service:generic",
+      "model": "viam:camera-calibration:handeye",
+      "short_description": "Hand-eye calibration service for arm-mounted cameras.",
+      "markdown_link": "README.md#viamcamera-calibrationhandeye"
+    }
+  ],
+  "applications": null,
+  "markdown_link": "README.md",
+  "entrypoint": "bin/camera-calibration",
+  "first_run": "",
+  "build": {
+    "build": "make module.tar.gz",
+    "setup": "make setup",
+    "path": "module.tar.gz",
+    "arch": [
+      "linux/amd64",
+      "linux/arm64",
+      "darwin/arm64"
+    ]
+  }
+}
