@@ -1,2 +1,3 @@
-# No third-party Python dependencies yet.
-# opencv-python, numpy, and scipy get added when detection and solver land.
+opencv-contrib-python==4.10.0.84
+numpy==2.2.6
+pytest==9.0.3
