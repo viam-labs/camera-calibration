@@ -6,7 +6,16 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            platform: linux/amd64
+            viam_cli: viam-cli-latest-linux-amd64
+          - runs-on: macos-latest
+            platform: darwin/arm64
+            viam_cli: viam-cli-latest-darwin-arm64
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +38,7 @@ jobs:
 
       - name: Install viam CLI
         run: |
-          curl -sSL https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-latest-linux-amd64 -o viam
+          curl -sSL "https://storage.googleapis.com/packages.viam.com/apps/viam-cli/${{ matrix.viam_cli }}" -o viam
           chmod +x viam
           sudo mv viam /usr/local/bin/viam
 
@@ -40,4 +49,4 @@ jobs:
         run: |
           viam login api-key --key-id "$VIAM_API_KEY_ID" --key "$VIAM_API_KEY"
           VERSION="${GITHUB_REF_NAME#v}"
-          viam module upload --version="$VERSION" --platform=linux/amd64 module.tar.gz
+          viam module upload --version="$VERSION" --platform=${{ matrix.platform }} module.tar.gz
