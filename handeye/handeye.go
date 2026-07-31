@@ -12,6 +12,8 @@ import (
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/services/generic"
+
+	"github.com/viam-labs/camera-calibration/internal/verb"
 )
 
 // Model is the resource model for the handeye calibration service.
@@ -70,15 +72,16 @@ func (h *handeye) DoCommand(
 	_ context.Context,
 	cmd map[string]interface{},
 ) (map[string]interface{}, error) {
-	for verb := range cmd {
-		switch verb {
-		case "calibrate", "cancel", "result":
-			return nil, errNotImplemented
-		default:
-			return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", verb)
-		}
+	v, err := verb.Single(cmd)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("no verb provided in DoCommand")
+	switch v {
+	case "calibrate", "cancel", "result":
+		return nil, errNotImplemented
+	default:
+		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", v)
+	}
 }
 
 func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
