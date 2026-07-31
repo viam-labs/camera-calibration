@@ -9,13 +9,13 @@
       "api": "rdk:component:pose_tracker",
       "model": "viam:camera-calibration:charuco",
       "short_description": "ChArUco board pose tracker.",
-      "markdown_link": "README.md#viamcamera-calibrationcharuco"
+      "markdown_link": "README.md"
     },
     {
       "api": "rdk:service:generic",
       "model": "viam:camera-calibration:handeye",
       "short_description": "Hand-eye calibration service for arm-mounted cameras.",
-      "markdown_link": "README.md#viamcamera-calibrationhandeye"
+      "markdown_link": "README.md"
     }
   ],
   "applications": null,
@@ -27,7 +27,8 @@
     "setup": "make setup",
     "path": "module.tar.gz",
     "arch": [
-      "linux/amd64"
+      "linux/amd64",
+      "darwin/arm64"
     ]
   }
 }
