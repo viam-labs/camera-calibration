@@ -1,0 +1,45 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - revive
+    - gosec
+  settings:
+    govet:
+      enable:
+        - shadow
+      disable:
+        - fieldalignment
+    gosec:
+      excludes:
+        - G104 # Unhandled errors — already caught by errcheck.
+        - G115 # Integer overflow conversion — noisy in Go 1.25+.
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: context-as-argument
+          arguments:
+            - allowTypesBefore: "testing.TB,*testing.T,*testing.B,*testing.F"
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/viam-labs/camera-calibration)
+    gofumpt:
+      extra-rules: true

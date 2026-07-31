@@ -13,6 +13,7 @@ import (
 	"go.viam.com/rdk/resource"
 )
 
+// Model is the resource model for the charuco pose tracker.
 var Model = resource.NewModel("viam", "camera-calibration", "charuco")
 
 var errNotImplemented = errors.New("charuco pose tracker: not implemented")
@@ -25,10 +26,13 @@ func init() {
 	)
 }
 
+// Config is the attribute configuration for the charuco pose tracker.
 type Config struct {
 	Camera string `json:"camera"`
 }
 
+// Validate checks that required fields are set and returns the implicit
+// dependencies for the component.
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Camera == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "camera")
