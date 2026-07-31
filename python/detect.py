@@ -83,10 +83,11 @@ def detect(
     )
     detector = aruco.CharucoDetector(board)
 
-    charuco_corners, charuco_ids, _marker_corners, _marker_ids = detector.detectBoard(image)
+    charuco_corners, charuco_ids, _marker_corners, marker_ids = detector.detectBoard(image)
 
+    marker_count = 0 if marker_ids is None else int(len(marker_ids))
     if charuco_corners is None or charuco_ids is None or len(charuco_ids) < 4:
-        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+        return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
 
     camera_matrix = np.array([
         [intrinsics["fx"], 0.0, intrinsics["cx"]],
@@ -97,11 +98,11 @@ def detect(
 
     obj_points, img_points = board.matchImagePoints(charuco_corners, charuco_ids)
     if obj_points is None or len(obj_points) < 4:
-        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+        return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
 
     ok, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera_matrix, dist)
     if not ok:
-        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+        return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
 
     R, _ = cv2.Rodrigues(rvec)
     t = tvec.flatten()
@@ -122,6 +123,7 @@ def detect(
 
     return {
         "num_detected": len(corners),
+        "marker_count": marker_count,
         "corners": corners,
         "board_pose_mm": {
             "translation": [float(t[0]), float(t[1]), float(t[2])],
