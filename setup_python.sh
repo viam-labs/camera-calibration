@@ -2,8 +2,12 @@
 cd "$(dirname "$0")"
 
 VENV_NAME=".venv"
-UV="$HOME/.local/bin/uv"
 ENV_ERROR="This module requires Python >=3.10, pip, and virtualenv to be installed."
+
+if ! command -v uv >/dev/null && [ ! -x "$HOME/.local/bin/uv" ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 
 if ! $UV venv --python=3.10 "$VENV_NAME" --clear >/dev/null 2>&1; then
     echo "Failed to create virtualenv."
