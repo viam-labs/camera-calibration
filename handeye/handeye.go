@@ -8,11 +8,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"sync"
+	"time"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/posetracker"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/motionplan/armplanning"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/services/generic"
@@ -23,8 +27,6 @@ import (
 
 // Model is the resource model for the handeye calibration service.
 var Model = resource.NewModel("viam", "camera-calibration", "handeye")
-
-var errNotImplemented = errors.New("handeye calibration: not implemented")
 
 func init() {
 	resource.RegisterService(generic.API, Model,
@@ -85,8 +87,13 @@ type handeye struct {
 
 	name    resource.Name
 	logger  logging.Logger
+	cfg     *Config
 	arm     arm.Arm
 	tracker posetracker.PoseTracker
+
+	mu         sync.Mutex
+	cancelFn   context.CancelFunc     // non-nil while calibrate is running
+	lastResult map[string]interface{} // cached result of last successful calibrate
 }
 
 func newHandeye(
@@ -110,6 +117,7 @@ func newHandeye(
 	return &handeye{
 		name:    conf.ResourceName(),
 		logger:  logger,
+		cfg:     cfg,
 		arm:     a,
 		tracker: tr,
 	}, nil
@@ -120,7 +128,7 @@ func (h *handeye) Name() resource.Name {
 }
 
 func (h *handeye) DoCommand(
-	_ context.Context,
+	ctx context.Context,
 	cmd map[string]interface{},
 ) (map[string]interface{}, error) {
 	v, err := verb.Single(cmd)
@@ -128,15 +136,207 @@ func (h *handeye) DoCommand(
 		return nil, err
 	}
 	switch v {
-	case "calibrate", "cancel", "result":
-		return nil, errNotImplemented
+	case "calibrate":
+		return h.calibrate(ctx)
+	case "cancel":
+		return h.cancel(ctx)
+	case "result":
+		return h.result()
 	default:
 		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", v)
 	}
 }
 
+// calibrate runs seed → pose generation → sweep + capture, returning
+// the collected stations. Only one calibrate can run at a time.
+func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error) {
+	calibCtx, cancel := context.WithCancel(ctx)
+	h.mu.Lock()
+	if h.cancelFn != nil {
+		h.mu.Unlock()
+		cancel()
+		return nil, errors.New("handeye: calibrate already running")
+	}
+	h.cancelFn = cancel
+	h.mu.Unlock()
+
+	defer func() {
+		h.mu.Lock()
+		h.cancelFn = nil
+		h.mu.Unlock()
+	}()
+
+	seedRes, err := h.seed(calibCtx)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: seed: %w", err)
+	}
+
+	//nolint:gosec // sampling for pose generation, not crypto
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	poses, err := generatePoses(seedRes.BoardInBase.Point(), h.cfg.NumPoses, h.cfg.WorkspaceBounds, rng)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: generate poses: %w", err)
+	}
+
+	stations, err := h.sweepAndCapture(calibCtx, poses)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: sweep: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"num_stations": len(stations),
+		"stations":     stations,
+	}
+	h.mu.Lock()
+	h.lastResult = result
+	h.mu.Unlock()
+	return result, nil
+}
+
+// cancel halts a running calibrate: cancels its context and calls
+// arm.Stop() for immediate motion halt. Safety-critical, not a feature.
+func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
+	h.mu.Lock()
+	cancel := h.cancelFn
+	h.mu.Unlock()
+
+	if cancel == nil {
+		return nil, errors.New("handeye: no calibrate running")
+	}
+	cancel()
+	if err := h.arm.Stop(ctx, nil); err != nil {
+		h.logger.Warnf("handeye: arm.Stop failed during cancel: %v", err)
+	}
+	return map[string]interface{}{"cancelled": true}, nil
+}
+
+func (h *handeye) result() (map[string]interface{}, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.lastResult == nil {
+		return nil, errors.New("handeye: no calibrate has completed yet")
+	}
+	return h.lastResult, nil
+}
+
+// sweepAndCapture plans + executes a move to each target pose, waits
+// settle_seconds, captures the board pose from the tracker, and records
+// the (T_be, T_cw) station. Unreachable poses (plan fails) and failed
+// captures are skipped and logged.
+func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose) ([]map[string]interface{}, error) {
+	armModel, err := h.arm.Kinematics(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: get arm kinematics: %w", err)
+	}
+	fs := referenceframe.NewEmptyFrameSystem("handeye")
+	if err := fs.AddFrame(armModel, fs.World()); err != nil {
+		return nil, fmt.Errorf("handeye: build frame system: %w", err)
+	}
+
+	stations := make([]map[string]interface{}, 0, len(poses))
+	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
+
+	for i, target := range poses {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		planErr, execErr := h.planAndExecute(ctx, fs, target)
+		if execErr != nil {
+			// Motion failure (estop, pstop, collision, comms loss, ...) —
+			// arm state is unknown, do not continue sweeping.
+			return nil, fmt.Errorf("handeye: pose %d execute failed, halting sweep: %w", i, execErr)
+		}
+		if planErr != nil {
+			h.logger.Infof("handeye: pose %d unreachable, skipping: %v", i, planErr)
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(settleDur):
+		}
+
+		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": map[string]interface{}{}})
+		if err != nil {
+			h.logger.Infof("handeye: pose %d detect failed, skipping: %v", i, err)
+			continue
+		}
+		boardInCamera, err := parseBoardPose(detectResp)
+		if err != nil {
+			h.logger.Infof("handeye: pose %d board not detected, skipping", i)
+			continue
+		}
+
+		actualEndPose, err := h.arm.EndPosition(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("handeye: read arm pose at station %d: %w", i, err)
+		}
+
+		stations = append(stations, map[string]interface{}{
+			"T_be": poseToJSON(actualEndPose),
+			"T_cw": poseToJSON(boardInCamera),
+		})
+	}
+	return stations, nil
+}
+
+// planAndExecute plans motion from the arm's current state to `target` in
+// the world frame, then executes the resulting trajectory. Returns
+// (planErr, execErr) so the caller can distinguish "unreachable pose,
+// safe to skip" from "motion failed mid-execution, halt for safety".
+// Kept separate from execution so a future diagnostic layer can inspect
+// or save the plan between the two steps (see sanding's planAndMoveArmToPose).
+func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
+	armName := h.arm.Name().Name
+	currentInputs, err := h.arm.JointPositions(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("get current joints: %w", err), nil
+	}
+
+	startState := armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{
+		armName: currentInputs,
+	})
+	goalState := armplanning.NewPlanState(referenceframe.FrameSystemPoses{
+		armName: referenceframe.NewPoseInFrame(referenceframe.World, target),
+	}, nil)
+
+	plan, _, err := armplanning.PlanMotion(ctx, h.logger, &armplanning.PlanRequest{
+		FrameSystem: fs,
+		StartState:  startState,
+		Goals:       []*armplanning.PlanState{goalState},
+	})
+	if err != nil {
+		return fmt.Errorf("plan motion: %w", err), nil
+	}
+
+	trajectory := make([][]referenceframe.Input, 0, len(plan.Trajectory()))
+	for _, fsInputs := range plan.Trajectory() {
+		armInputs, err := fsInputs.GetFrameInputs(fs.Frame(armName))
+		if err != nil {
+			return fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
+		}
+		trajectory = append(trajectory, armInputs)
+	}
+
+	if err := h.arm.MoveThroughJointPositions(ctx, trajectory, nil, nil); err != nil {
+		return nil, fmt.Errorf("execute trajectory: %w", err)
+	}
+	return nil, nil
+}
+
+// seedResult is the typed output of seed(), consumed by calibrate() to
+// derive the look-at target for pose generation.
+type seedResult struct {
+	ArmJoints     []float64
+	ArmEndPose    spatialmath.Pose
+	BoardInCamera spatialmath.Pose
+	BoardInBase   spatialmath.Pose
+}
+
 // seed reads arm pose + board detection, returning a nominal board-in-base estimate.
-func (h *handeye) seed(ctx context.Context) (map[string]interface{}, error) {
+func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	joints, err := h.arm.JointPositions(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("handeye: read arm joints: %w", err)
@@ -158,11 +358,11 @@ func (h *handeye) seed(ctx context.Context) (map[string]interface{}, error) {
 	// Nominal camera-at-flange (X = identity); ~50-100mm off in practice, fine for sweep planning.
 	boardInBase := spatialmath.Compose(endPose, boardInCamera)
 
-	return map[string]interface{}{
-		"arm_joints_rad":          jointsToFloats(joints),
-		"arm_end_position_mm":     poseToJSON(endPose),
-		"board_pose_in_camera_mm": poseToJSON(boardInCamera),
-		"board_pose_in_base_mm":   poseToJSON(boardInBase),
+	return &seedResult{
+		ArmJoints:     jointsToFloats(joints),
+		ArmEndPose:    endPose,
+		BoardInCamera: boardInCamera,
+		BoardInBase:   boardInBase,
 	}, nil
 }
 
