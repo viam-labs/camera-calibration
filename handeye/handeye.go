@@ -36,8 +36,11 @@ func init() {
 
 // Config is the attribute configuration for the handeye calibration service.
 type Config struct {
-	Arm         string `json:"arm"`
-	PoseTracker string `json:"pose_tracker"`
+	Arm             string          `json:"arm"`
+	PoseTracker     string          `json:"pose_tracker"`
+	NumPoses        int             `json:"num_poses"`
+	WorkspaceBounds WorkspaceBounds `json:"workspace_bounds"`
+	SettleSeconds   float64         `json:"settle_seconds"`
 }
 
 // Validate checks that required fields are set and returns the implicit
@@ -48,6 +51,30 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.PoseTracker == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "pose_tracker")
+	}
+	if cfg.NumPoses == 0 {
+		cfg.NumPoses = 20
+	}
+	if cfg.NumPoses < 3 {
+		return nil, nil, fmt.Errorf("num_poses must be >= 3, got %d", cfg.NumPoses)
+	}
+	for _, axis := range []struct {
+		name string
+		b    AxisBounds
+	}{
+		{"x", cfg.WorkspaceBounds.X},
+		{"y", cfg.WorkspaceBounds.Y},
+		{"z", cfg.WorkspaceBounds.Z},
+	} {
+		if axis.b.Min >= axis.b.Max {
+			return nil, nil, fmt.Errorf("workspace_bounds.%s.min (%g) must be < max (%g)", axis.name, axis.b.Min, axis.b.Max)
+		}
+	}
+	if cfg.SettleSeconds == 0 {
+		cfg.SettleSeconds = 2.0
+	}
+	if cfg.SettleSeconds < 0 {
+		return nil, nil, fmt.Errorf("settle_seconds must be > 0, got %g", cfg.SettleSeconds)
 	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
