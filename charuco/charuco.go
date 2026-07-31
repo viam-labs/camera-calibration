@@ -71,3 +71,7 @@ func (c *charuco) DoCommand(
 ) (map[string]interface{}, error) {
 	return nil, errNotImplemented
 }
+
+func (c *charuco) Status(_ context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
