@@ -1,0 +1,2 @@
+# No third-party Python dependencies yet.
+# opencv-python, numpy, and scipy get added when detection and solver land.
