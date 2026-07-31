@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.viam.com/rdk/logging"
 	"go.viam.com/test"
 )
 
@@ -26,7 +27,8 @@ func TestPing(t *testing.T) {
 	scriptPath, err := filepath.Abs(filepath.Join("..", "python", "ping.py"))
 	test.That(t, err, test.ShouldBeNil)
 
-	stdout, err := Run(context.Background(), pythonBin, scriptPath)
+	logger := logging.NewTestLogger(t)
+	stdout, err := Run(context.Background(), logger, pythonBin, scriptPath)
 	test.That(t, err, test.ShouldBeNil)
 
 	var resp pingResponse
