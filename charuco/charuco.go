@@ -5,13 +5,21 @@ package charuco
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 
+	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/posetracker"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+
+	"github.com/viam-labs/camera-calibration/pyrunner"
 )
 
 // Model is the resource model for the charuco pose tracker.
@@ -93,17 +101,41 @@ type charuco struct {
 	resource.AlwaysRebuild
 	resource.TriviallyCloseable
 
-	name   resource.Name
-	logger logging.Logger
+	name       resource.Name
+	logger     logging.Logger
+	cfg        *Config
+	camera     camera.Camera
+	pythonBin  string
+	scriptPath string
 }
 
 func newCharuco(
 	_ context.Context,
-	_ resource.Dependencies,
+	deps resource.Dependencies,
 	conf resource.Config,
 	logger logging.Logger,
 ) (posetracker.PoseTracker, error) {
-	return &charuco{name: conf.ResourceName(), logger: logger}, nil
+	cfg, err := resource.NativeConfig[*Config](conf)
+	if err != nil {
+		return nil, err
+	}
+	cam, err := camera.FromProvider(deps, cfg.Camera)
+	if err != nil {
+		return nil, fmt.Errorf("charuco: get camera dep %q: %w", cfg.Camera, err)
+	}
+
+	// Dev-mode path resolution: anchor to this source file, walk up to repo root.
+	// Deployment (PyInstaller) will use a different resolution — separate PR.
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Dir(filepath.Dir(thisFile))
+	return &charuco{
+		name:       conf.ResourceName(),
+		logger:     logger,
+		cfg:        cfg,
+		camera:     cam,
+		pythonBin:  filepath.Join(repoRoot, ".venv", "bin", "python"),
+		scriptPath: filepath.Join(repoRoot, "python", "detect.py"),
+	}, nil
 }
 
 func (c *charuco) Name() resource.Name {
@@ -118,11 +150,65 @@ func (c *charuco) Poses(
 	return nil, errNotImplemented
 }
 
-func (c *charuco) DoCommand(
-	_ context.Context,
-	_ map[string]interface{},
-) (map[string]interface{}, error) {
-	return nil, errNotImplemented
+func (c *charuco) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+	for verb := range cmd {
+		switch verb {
+		case "detect":
+			return c.detectViaCommand(ctx)
+		default:
+			return nil, fmt.Errorf("unknown verb %q; expected: detect", verb)
+		}
+	}
+	return nil, errors.New("no verb provided in DoCommand")
+}
+
+func (c *charuco) detectViaCommand(ctx context.Context) (map[string]interface{}, error) {
+	stdout, err := c.captureAndDetect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		return nil, fmt.Errorf("charuco: parse detect.py output: %w", err)
+	}
+	return result, nil
+}
+
+func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
+	images, _, err := c.camera.Images(ctx, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("charuco: capture images: %w", err)
+	}
+	if len(images) == 0 {
+		return nil, errors.New("charuco: camera returned no images")
+	}
+	imgBytes, err := images[0].Bytes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("charuco: get image bytes: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "charuco-*.img")
+	if err != nil {
+		return nil, fmt.Errorf("charuco: create temp file: %w", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	if _, err := tmpFile.Write(imgBytes); err != nil {
+		_ = tmpFile.Close()
+		return nil, fmt.Errorf("charuco: write temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("charuco: close temp file: %w", err)
+	}
+
+	return pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,
+		tmpFile.Name(),
+		c.cfg.Dictionary,
+		strconv.Itoa(c.cfg.SquaresX),
+		strconv.Itoa(c.cfg.SquaresY),
+		strconv.FormatFloat(c.cfg.SquareLengthMM, 'f', -1, 64),
+		strconv.FormatFloat(c.cfg.MarkerLengthMM, 'f', -1, 64),
+	)
 }
 
 func (c *charuco) Status(_ context.Context) (map[string]interface{}, error) {

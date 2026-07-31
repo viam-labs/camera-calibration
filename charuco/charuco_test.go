@@ -1,12 +1,16 @@
 package charuco
 
 import (
+	"context"
 	"testing"
 
+	"go.viam.com/rdk/components/camera"
+	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/testutils/inject"
 	"go.viam.com/test"
 )
 
-// validCfg is a minimal valid config used as a starting point for tests.
 func validCfg() Config {
 	return Config{
 		Camera:         "cam",
@@ -83,4 +87,39 @@ func TestConfigValidate(t *testing.T) {
 			test.That(t, err.Error(), test.ShouldEqual, tt.wantErr)
 		})
 	}
+}
+
+func TestNewCharucoResolvesCamera(t *testing.T) {
+	cfg := validCfg()
+	deps := resource.Dependencies{
+		camera.Named(cfg.Camera): &inject.Camera{},
+	}
+	conf := resource.Config{
+		Name:                "test-charuco",
+		API:                 resource.APINamespaceRDK.WithComponentType("pose_tracker"),
+		ConvertedAttributes: &cfg,
+	}
+	r, err := newCharuco(context.Background(), deps, conf, logging.NewTestLogger(t))
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, r, test.ShouldNotBeNil)
+}
+
+func TestDoCommandUnknownVerb(t *testing.T) {
+	c := &charuco{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+	}
+	_, err := c.DoCommand(context.Background(), map[string]interface{}{"bogus": nil})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, `unknown verb "bogus"`)
+}
+
+func TestDoCommandNoVerb(t *testing.T) {
+	c := &charuco{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+	}
+	_, err := c.DoCommand(context.Background(), map[string]interface{}{})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldEqual, "no verb provided in DoCommand")
 }
