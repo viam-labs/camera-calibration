@@ -73,7 +73,12 @@ func TestDoCommand(t *testing.T) {
 		{
 			name:    "empty command rejected",
 			cmd:     map[string]interface{}{},
-			wantErr: "no verb provided in DoCommand",
+			wantErr: "expected exactly one verb in DoCommand, got 0",
+		},
+		{
+			name:    "multiple verbs rejected",
+			cmd:     map[string]interface{}{"calibrate": nil, "cancel": nil},
+			wantErr: "expected exactly one verb in DoCommand, got 2",
 		},
 	}
 

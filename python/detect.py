@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ChArUco corner detection. Runnable as a CLI for pyrunner."""
+"""ChArUco corner detection + PnP. Runnable as a CLI for pyrunner."""
 
 import json
 import sys
@@ -38,8 +38,9 @@ def detect(
     squares_y: int,
     square_length_mm: float,
     marker_length_mm: float,
+    intrinsics: dict,
 ) -> dict:
-    """Detect ChArUco corners in an image.
+    """Detect ChArUco corners and compute board pose via PnP.
 
     Args:
         image_bytes: raw image bytes (JPEG, PNG, etc.). Decoded via cv2.imdecode.
@@ -47,14 +48,20 @@ def detect(
         squares_x, squares_y: board grid dimensions (number of squares).
         square_length_mm: physical chessboard square size in mm.
         marker_length_mm: physical ArUco marker size in mm; must be < square_length_mm.
+        intrinsics: {"fx", "fy", "cx", "cy", "distortion": [...]}. Distortion is
+            a list of Brown-Conrady coefficients in cv2 order (k1, k2, p1, p2, k3);
+            empty list = no distortion.
 
     Returns:
         {
             "num_detected": int,
-            "corners": [{"id": int, "x": float, "y": float}, ...],
+            "corners": [{"id": int, "x": float, "y": float, "position_mm": [x, y, z]}, ...],
+            "board_pose_mm": {"translation": [x, y, z], "rvec": [rx, ry, rz]} | None,
         }
-        `corners` is empty if no corners are detected. IDs match the board's
-        interior-corner numbering (0 to (squares_x-1)*(squares_y-1) - 1).
+        `corners` is empty and `board_pose_mm` is None if fewer than 4 corners are
+        detected (insufficient for PnP). `rvec` is the compact axis-angle
+        representation from cv2.Rodrigues (magnitude = angle, direction = axis);
+        Go-side conversion to quaternion via RDK spatialmath.R3ToR4.
 
     Raises:
         ValueError: unknown dictionary name or unreadable image bytes.
@@ -78,23 +85,56 @@ def detect(
 
     charuco_corners, charuco_ids, _marker_corners, _marker_ids = detector.detectBoard(image)
 
-    if charuco_corners is None or charuco_ids is None:
-        return {"num_detected": 0, "corners": []}
+    if charuco_corners is None or charuco_ids is None or len(charuco_ids) < 4:
+        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+
+    camera_matrix = np.array([
+        [intrinsics["fx"], 0.0, intrinsics["cx"]],
+        [0.0, intrinsics["fy"], intrinsics["cy"]],
+        [0.0, 0.0, 1.0],
+    ])
+    dist = np.array(intrinsics.get("distortion") or [0.0, 0.0, 0.0, 0.0, 0.0])
+
+    obj_points, img_points = board.matchImagePoints(charuco_corners, charuco_ids)
+    if obj_points is None or len(obj_points) < 4:
+        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+
+    ok, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera_matrix, dist)
+    if not ok:
+        return {"num_detected": 0, "corners": [], "board_pose_mm": None}
+
+    R, _ = cv2.Rodrigues(rvec)
+    t = tvec.flatten()
+    r = rvec.flatten()
 
     corners = []
     for i in range(len(charuco_ids)):
         cid = int(charuco_ids[i].item())
-        cx, cy = charuco_corners[i][0]
-        corners.append({"id": cid, "x": float(cx), "y": float(cy)})
+        px, py = charuco_corners[i][0]
+        board_pt = obj_points[i][0]
+        cam_pt = R @ board_pt + t
+        corners.append({
+            "id": cid,
+            "x": float(px),
+            "y": float(py),
+            "position_mm": [float(cam_pt[0]), float(cam_pt[1]), float(cam_pt[2])],
+        })
 
-    return {"num_detected": len(corners), "corners": corners}
+    return {
+        "num_detected": len(corners),
+        "corners": corners,
+        "board_pose_mm": {
+            "translation": [float(t[0]), float(t[1]), float(t[2])],
+            "rvec": [float(r[0]), float(r[1]), float(r[2])],
+        },
+    }
 
 
 def main() -> None:
-    if len(sys.argv) != 7:
+    if len(sys.argv) != 8:
         sys.stderr.write(
             "usage: detect.py <image_path> <dictionary> <squares_x> "
-            "<squares_y> <square_length_mm> <marker_length_mm>\n"
+            "<squares_y> <square_length_mm> <marker_length_mm> <intrinsics_json>\n"
         )
         sys.exit(2)
     result = detect(
@@ -104,6 +144,7 @@ def main() -> None:
         int(sys.argv[4]),
         float(sys.argv[5]),
         float(sys.argv[6]),
+        json.loads(sys.argv[7]),
     )
     print(json.dumps(result))
 
