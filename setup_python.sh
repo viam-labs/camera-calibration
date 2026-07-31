@@ -29,10 +29,6 @@ if ! $UV venv --python=3.10 "$VENV_NAME" --clear >/dev/null 2>&1; then
 fi
 
 echo "Virtualenv found/created. Installing/upgrading Python packages..."
-if ! [ -f .installed ]; then
-    if ! $UV pip install -r requirements.txt -Uqq; then
-        exit 1
-    else
-        touch .installed
-    fi
+if ! $UV pip install -r requirements.txt -Uqq; then
+    exit 1
 fi
