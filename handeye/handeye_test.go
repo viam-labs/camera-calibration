@@ -15,12 +15,12 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name:    "missing arm",
 			cfg:     Config{PoseTracker: "tracker"},
-			wantErr: `error validating "test": expected "arm" attribute`,
+			wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`,
 		},
 		{
 			name:    "missing pose_tracker",
 			cfg:     Config{Arm: "arm"},
-			wantErr: `error validating "test": expected "pose_tracker" attribute`,
+			wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`,
 		},
 		{
 			name:    "valid",

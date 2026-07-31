@@ -15,7 +15,7 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name:    "missing camera",
 			cfg:     Config{},
-			wantErr: `error validating "test": expected "camera" attribute`,
+			wantErr: `Error validating, missing required field. Path: "test" Field: "camera"`,
 		},
 		{
 			name:    "valid",
