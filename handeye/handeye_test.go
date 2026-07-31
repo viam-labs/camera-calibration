@@ -4,8 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/rdk/testutils/inject"
 	"go.viam.com/test"
 )
 
@@ -95,4 +99,68 @@ func TestDoCommand(t *testing.T) {
 			test.That(t, err.Error(), test.ShouldEqual, tt.wantErr)
 		})
 	}
+}
+
+func TestSeedReturnsExpectedShape(t *testing.T) {
+	a := &inject.Arm{}
+	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
+		return []referenceframe.Input{0.1, 0.2, 0.3}, nil
+	}
+	a.EndPositionFunc = func(_ context.Context, _ map[string]interface{}) (spatialmath.Pose, error) {
+		return spatialmath.NewPoseFromPoint(r3.Vector{X: 100, Y: 200, Z: 300}), nil
+	}
+
+	tr := &inject.PoseTracker{}
+	tr.DoFunc = func(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"board_pose_mm": map[string]interface{}{
+				"translation": []interface{}{10.0, 20.0, 400.0},
+				"rvec":        []interface{}{0.1, 0.0, 0.0},
+			},
+		}, nil
+	}
+
+	h := &handeye{
+		name:    resource.Name{},
+		logger:  logging.NewTestLogger(t),
+		arm:     a,
+		tracker: tr,
+	}
+
+	resp, err := h.seed(context.Background())
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, resp["arm_joints_rad"], test.ShouldResemble, []float64{0.1, 0.2, 0.3})
+	test.That(t, resp["arm_end_position_mm"], test.ShouldNotBeNil)
+	test.That(t, resp["board_pose_in_camera_mm"], test.ShouldNotBeNil)
+	test.That(t, resp["board_pose_in_base_mm"], test.ShouldNotBeNil)
+}
+
+func TestSeedBoardNotDetectedErrors(t *testing.T) {
+	a := &inject.Arm{}
+	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
+		return []referenceframe.Input{0}, nil
+	}
+	a.EndPositionFunc = func(_ context.Context, _ map[string]interface{}) (spatialmath.Pose, error) {
+		return spatialmath.NewZeroPose(), nil
+	}
+
+	tr := &inject.PoseTracker{}
+	tr.DoFunc = func(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"num_detected":  0,
+			"corners":       []interface{}{},
+			"board_pose_mm": nil,
+		}, nil
+	}
+
+	h := &handeye{
+		name:    resource.Name{},
+		logger:  logging.NewTestLogger(t),
+		arm:     a,
+		tracker: tr,
+	}
+
+	_, err := h.seed(context.Background())
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "board not detected")
 }
