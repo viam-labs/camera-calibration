@@ -1,7 +1,7 @@
 BINARY := camera-calibration
 BIN_DIR := bin
 
-.PHONY: setup venv build lint check-lint test module.tar.gz clean
+.PHONY: setup venv build lint check-lint test python-test module.tar.gz clean
 
 default: module.tar.gz
 
@@ -24,6 +24,10 @@ check-lint:
 
 test:
 	go test ./...
+	$(MAKE) python-test
+
+python-test:
+	.venv/bin/pytest python/ -v
 
 module.tar.gz: build
 	tar czf module.tar.gz $(BIN_DIR)/$(BINARY) meta.json first_run.sh
