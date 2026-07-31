@@ -1,12 +1,15 @@
 BINARY := camera-calibration
 BIN_DIR := bin
 
-.PHONY: setup build lint check-lint test module.tar.gz clean
+.PHONY: setup venv build lint check-lint test module.tar.gz clean
 
 default: module.tar.gz
 
-setup:
+setup: venv
 	go mod tidy
+
+venv:
+	bash ./setup_python.sh
 
 build:
 	@mkdir -p $(BIN_DIR)
@@ -23,7 +26,7 @@ test:
 	go test ./...
 
 module.tar.gz: build
-	tar czf module.tar.gz $(BIN_DIR)/$(BINARY) meta.json
+	tar czf module.tar.gz $(BIN_DIR)/$(BINARY) meta.json first_run.sh
 	@echo "Created module.tar.gz"
 
 clean:
