@@ -14,6 +14,7 @@ import (
 	"go.viam.com/rdk/services/generic"
 )
 
+// Model is the resource model for the handeye calibration service.
 var Model = resource.NewModel("viam", "camera-calibration", "handeye")
 
 var errNotImplemented = errors.New("handeye calibration: not implemented")
@@ -26,11 +27,14 @@ func init() {
 	)
 }
 
+// Config is the attribute configuration for the handeye calibration service.
 type Config struct {
 	Arm         string `json:"arm"`
 	PoseTracker string `json:"pose_tracker"`
 }
 
+// Validate checks that required fields are set and returns the implicit
+// dependencies for the service.
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "arm")
