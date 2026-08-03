@@ -79,6 +79,14 @@ def test_round_trip_tsai():
     assert angle_err_deg < 0.1, f"rotation error {angle_err_deg:.4f}° exceeds 0.1° tolerance"
 
 
+def test_residuals_near_zero_for_synthetic():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=15)
+    result = solve(stations, method="tsai")
+    assert result["residuals"]["translation_mm"] < 1.0
+    assert result["residuals"]["rotation_deg"] < 0.1
+
+
 def test_insufficient_stations_raises():
     x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
     stations = _synthetic_stations(x_true, n_stations=2)

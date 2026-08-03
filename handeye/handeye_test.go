@@ -37,7 +37,6 @@ func TestConfigValidate(t *testing.T) {
 		{name: "missing arm", mutate: func(c *Config) { c.Arm = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`},
 		{name: "missing pose_tracker", mutate: func(c *Config) { c.PoseTracker = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`},
 		{name: "num_poses too small", mutate: func(c *Config) { c.NumPoses = 2 }, wantErr: "num_poses must be >= 3, got 2"},
-		{name: "num_poses unset defaults to 20", mutate: func(c *Config) { c.NumPoses = 0 }, wantErr: ""},
 		{name: "workspace_bounds x invalid", mutate: func(c *Config) { c.WorkspaceBounds.X = AxisBounds{Min: 100, Max: 100} }, wantErr: "workspace_bounds.x.min (100) must be < max (100)"},
 		{name: "workspace_bounds y inverted", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{Min: 200, Max: 100} }, wantErr: "workspace_bounds.y.min (200) must be < max (100)"},
 		{name: "workspace_bounds z zero", mutate: func(c *Config) { c.WorkspaceBounds.Z = AxisBounds{} }, wantErr: "workspace_bounds.z.min (0) must be < max (0)"},
@@ -57,6 +56,22 @@ func TestConfigValidate(t *testing.T) {
 			test.That(t, err.Error(), test.ShouldEqual, tt.wantErr)
 		})
 	}
+}
+
+func TestNumPosesDefaultsTo20AfterValidate(t *testing.T) {
+	cfg := validCfg()
+	cfg.NumPoses = 0
+	_, _, err := cfg.Validate("test")
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, cfg.NumPoses, test.ShouldEqual, 20)
+}
+
+func TestSettleSecondsDefaultsAfterValidate(t *testing.T) {
+	cfg := validCfg()
+	cfg.SettleSeconds = 0
+	_, _, err := cfg.Validate("test")
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, cfg.SettleSeconds, test.ShouldEqual, 2.0)
 }
 
 func TestDoCommandDispatch(t *testing.T) {
@@ -192,4 +207,33 @@ func TestConcurrentCalibrateRejected(t *testing.T) {
 	_, err := h.calibrate(context.Background())
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "already running")
+}
+
+func TestSolveResponseToResult(t *testing.T) {
+	resp := &solveResponse{}
+	resp.CameraInGripperMM.Translation = []float64{10.0, 20.0, 30.0}
+	resp.CameraInGripperMM.Rvec = []float64{0.0, 0.0, 0.0}
+	resp.Residuals.TranslationMM = 0.5
+	resp.Residuals.RotationDeg = 0.1
+
+	result := resp.toResult()
+
+	trans, ok := result["translation"].(map[string]float64)
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, trans["x"], test.ShouldEqual, 10.0)
+	test.That(t, trans["y"], test.ShouldEqual, 20.0)
+	test.That(t, trans["z"], test.ShouldEqual, 30.0)
+
+	orient, ok := result["orientation"].(map[string]interface{})
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, orient["type"], test.ShouldEqual, "ov_degrees")
+	ovValue, ok := orient["value"].(map[string]float64)
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, ovValue, test.ShouldContainKey, "x")
+	test.That(t, ovValue, test.ShouldContainKey, "y")
+	test.That(t, ovValue, test.ShouldContainKey, "z")
+	test.That(t, ovValue, test.ShouldContainKey, "th")
+
+	test.That(t, result["translation_residual_mm"], test.ShouldEqual, 0.5)
+	test.That(t, result["rotation_residual_deg"], test.ShouldEqual, 0.1)
 }

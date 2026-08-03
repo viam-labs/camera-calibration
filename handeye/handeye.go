@@ -6,9 +6,12 @@ package handeye
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"go.viam.com/rdk/spatialmath"
 
 	"github.com/viam-labs/camera-calibration/internal/verb"
+	"github.com/viam-labs/camera-calibration/pyrunner"
 )
 
 // Model is the resource model for the handeye calibration service.
@@ -85,11 +89,13 @@ type handeye struct {
 	resource.AlwaysRebuild
 	resource.TriviallyCloseable
 
-	name    resource.Name
-	logger  logging.Logger
-	cfg     *Config
-	arm     arm.Arm
-	tracker posetracker.PoseTracker
+	name      resource.Name
+	logger    logging.Logger
+	cfg       *Config
+	arm       arm.Arm
+	tracker   posetracker.PoseTracker
+	pythonBin string
+	solvePath string
 
 	mu         sync.Mutex
 	cancelFn   context.CancelFunc     // non-nil while calibrate is running
@@ -114,12 +120,19 @@ func newHandeye(
 	if err != nil {
 		return nil, fmt.Errorf("handeye: get pose_tracker dep %q: %w", cfg.PoseTracker, err)
 	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("handeye: resolve executable path: %w", err)
+	}
+	moduleRoot := filepath.Dir(filepath.Dir(exePath))
 	return &handeye{
-		name:    conf.ResourceName(),
-		logger:  logger,
-		cfg:     cfg,
-		arm:     a,
-		tracker: tr,
+		name:      conf.ResourceName(),
+		logger:    logger,
+		cfg:       cfg,
+		arm:       a,
+		tracker:   tr,
+		pythonBin: filepath.Join(moduleRoot, ".venv", "bin", "python"),
+		solvePath: filepath.Join(moduleRoot, "python", "solve.py"),
 	}, nil
 }
 
@@ -184,15 +197,87 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fmt.Errorf("handeye: sweep: %w", err)
 	}
-
-	result := map[string]interface{}{
-		"num_stations": len(stations),
-		"stations":     stations,
+	if len(stations) < h.cfg.NumPoses {
+		return nil, fmt.Errorf("handeye: captured %d of %d stations; fix setup or lower num_poses before retrying", len(stations), h.cfg.NumPoses)
 	}
+
+	result, err := h.runSolver(calibCtx, stations)
+	if err != nil {
+		return nil, err
+	}
+
 	h.mu.Lock()
 	h.lastResult = result
 	h.mu.Unlock()
 	return result, nil
+}
+
+type solveResponse struct {
+	CameraInGripperMM struct {
+		Translation []float64 `json:"translation"`
+		Rvec        []float64 `json:"rvec"`
+	} `json:"camera_in_gripper_mm"`
+	Residuals struct {
+		TranslationMM float64 `json:"translation_mm"`
+		RotationDeg   float64 `json:"rotation_deg"`
+	} `json:"residuals"`
+}
+
+func (s *solveResponse) toResult() map[string]interface{} {
+	t := s.CameraInGripperMM.Translation
+	rvec := r3.Vector{X: s.CameraInGripperMM.Rvec[0], Y: s.CameraInGripperMM.Rvec[1], Z: s.CameraInGripperMM.Rvec[2]}
+	ovd := spatialmath.R3ToR4(rvec).OrientationVectorDegrees()
+	return map[string]interface{}{
+		"translation": map[string]float64{"x": t[0], "y": t[1], "z": t[2]},
+		"orientation": map[string]interface{}{
+			"type": "ov_degrees",
+			"value": map[string]float64{
+				"x":  ovd.OX,
+				"y":  ovd.OY,
+				"z":  ovd.OZ,
+				"th": ovd.Theta,
+			},
+		},
+		"translation_residual_mm": s.Residuals.TranslationMM,
+		"rotation_residual_deg":   s.Residuals.RotationDeg,
+	}
+}
+
+func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface{}) (map[string]interface{}, error) {
+	payload, err := json.Marshal(map[string]interface{}{
+		"stations": stations,
+		"method":   "tsai",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("handeye: marshal solve input: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "handeye-solve-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("handeye: create solve input temp file: %w", err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	if _, werr := tmpFile.Write(payload); werr != nil {
+		_ = tmpFile.Close()
+		return nil, fmt.Errorf("handeye: write solve input: %w", werr)
+	}
+	if cerr := tmpFile.Close(); cerr != nil {
+		return nil, fmt.Errorf("handeye: close solve input: %w", cerr)
+	}
+
+	stdout, err := pyrunner.Run(ctx, h.logger, h.pythonBin, h.solvePath, tmpFile.Name())
+	if err != nil {
+		return nil, fmt.Errorf("handeye: solve: %w", err)
+	}
+
+	var resp solveResponse
+	if err := json.Unmarshal(stdout, &resp); err != nil {
+		return nil, fmt.Errorf("handeye: parse solve output: %w", err)
+	}
+	if len(resp.CameraInGripperMM.Translation) != 3 || len(resp.CameraInGripperMM.Rvec) != 3 {
+		return nil, fmt.Errorf("handeye: solve output missing translation or rvec")
+	}
+	return resp.toResult(), nil
 }
 
 func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
