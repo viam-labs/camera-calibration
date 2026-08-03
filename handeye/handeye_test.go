@@ -2,11 +2,13 @@ package handeye
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/golang/geo/r3"
+	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
@@ -149,6 +151,43 @@ func TestSeedBoardNotDetectedErrors(t *testing.T) {
 	_, err := h.seed(context.Background())
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "board not detected")
+}
+
+func TestReturnToStartingPoseSkippedWhenCancelled(t *testing.T) {
+	called := false
+	a := &inject.Arm{}
+	a.MoveThroughJointPositionsFunc = func(_ context.Context, _ [][]referenceframe.Input, _ *arm.MoveOptions, _ map[string]interface{}) error {
+		called = true
+		return nil
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.returnToStartingPose(context.Background(), cancelled, []referenceframe.Input{0.1, 0.2, 0.3})
+	test.That(t, called, test.ShouldBeFalse)
+}
+
+func TestReturnToStartingPoseMovesToJoints(t *testing.T) {
+	var gotPositions [][]referenceframe.Input
+	a := &inject.Arm{}
+	a.MoveThroughJointPositionsFunc = func(_ context.Context, positions [][]referenceframe.Input, _ *arm.MoveOptions, _ map[string]interface{}) error {
+		gotPositions = positions
+		return nil
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	starting := []referenceframe.Input{0.1, 0.2, 0.3}
+	h.returnToStartingPose(context.Background(), context.Background(), starting)
+	test.That(t, len(gotPositions), test.ShouldEqual, 1)
+	test.That(t, gotPositions[0], test.ShouldResemble, starting)
+}
+
+func TestReturnToStartingPoseSwallowsMoveError(t *testing.T) {
+	a := &inject.Arm{}
+	a.MoveThroughJointPositionsFunc = func(_ context.Context, _ [][]referenceframe.Input, _ *arm.MoveOptions, _ map[string]interface{}) error {
+		return errors.New("arm broke")
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	h.returnToStartingPose(context.Background(), context.Background(), []referenceframe.Input{0.1})
 }
 
 func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {

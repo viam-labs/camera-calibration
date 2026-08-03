@@ -204,6 +204,12 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		return err
 	}
 
+	startingJoints, err := h.arm.JointPositions(calibCtx, nil)
+	if err != nil {
+		return nil, fail(fmt.Errorf("handeye: read starting joints: %w", err))
+	}
+	defer h.returnToStartingPose(ctx, calibCtx, startingJoints)
+
 	seedRes, err := h.seed(calibCtx)
 	if err != nil {
 		return nil, fail(fmt.Errorf("handeye: seed: %w", err))
@@ -318,6 +324,17 @@ func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface
 		return nil, fmt.Errorf("handeye: solve output missing translation or rvec")
 	}
 	return resp.toResult(), nil
+}
+
+func (h *handeye) returnToStartingPose(ctx, calibCtx context.Context, joints []referenceframe.Input) {
+	if calibCtx.Err() != nil {
+		return
+	}
+	if err := h.arm.MoveThroughJointPositions(ctx, [][]referenceframe.Input{joints}, nil, nil); err != nil {
+		h.logger.Warnf("handeye: failed to return arm to starting pose: %v", err)
+		return
+	}
+	h.logger.Info("handeye: returned arm to starting pose")
 }
 
 func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
