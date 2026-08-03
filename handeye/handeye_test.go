@@ -142,11 +142,19 @@ func TestResultBeforeCalibrateErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no calibrate has completed yet")
 }
 
-func TestCancelWithNoRunningCalibrateErrors(t *testing.T) {
-	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: mockArm()}
-	_, err := h.cancel(context.Background())
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "no calibrate running")
+func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {
+	stopCalled := false
+	a := &inject.Arm{}
+	a.StopFunc = func(_ context.Context, _ map[string]interface{}) error {
+		stopCalled = true
+		return nil
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	resp, err := h.cancel(context.Background())
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, resp["cancelled"], test.ShouldEqual, true)
+	test.That(t, resp["was_running"], test.ShouldEqual, false)
+	test.That(t, stopCalled, test.ShouldBeFalse)
 }
 
 func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
@@ -165,10 +173,11 @@ func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
 		cancelFn: func() { cancelCalled = true },
 	}
 
-	_, err := h.cancel(context.Background())
+	resp, err := h.cancel(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, cancelCalled, test.ShouldBeTrue)
 	test.That(t, stopCalled, test.ShouldBeTrue)
+	test.That(t, resp["was_running"], test.ShouldEqual, true)
 }
 
 func TestConcurrentCalibrateRejected(t *testing.T) {

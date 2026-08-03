@@ -288,8 +288,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 
 // planAndExecute returns (planErr, execErr) so callers can distinguish
 // "unreachable pose, safe to skip" from "motion failed mid-execution,
-// halt for safety". The split also leaves a hook for a future diagnostic
-// layer to inspect the plan between the two steps.
+// halt for safety".
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
 	armName := h.arm.Name().Name
 	currentInputs, err := h.arm.JointPositions(ctx, nil)
@@ -328,8 +327,6 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	return nil, nil
 }
 
-// seedResult holds the initial arm + board observations used to derive
-// the look-at target for pose generation.
 type seedResult struct {
 	ArmJoints     []float64
 	ArmEndPose    spatialmath.Pose
