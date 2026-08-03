@@ -28,3 +28,5 @@ build
 *.egg-info
 
 .VIAM_RELOAD_ARCHIVE.tar.gz
+
+*.txt

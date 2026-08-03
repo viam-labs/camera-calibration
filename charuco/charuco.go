@@ -47,6 +47,10 @@ type Config struct {
 	// camera (e.g., "color" on an RGB+depth camera). Empty = take the first
 	// stream returned by camera.Images.
 	ImageSource string `json:"image_source"`
+	// Distortion optionally overrides the camera's distortion parameters.
+	// Use [0,0,0,0,0] for cameras that undistort on-device (e.g., Zivid).
+	// Length must be 4, 5, 8, 12, or 14 (OpenCV distortion vector sizes).
+	Distortion []float64 `json:"distortion"`
 }
 
 // validDictionaries is the set of ChArUco dictionaries we accept. Names
@@ -97,6 +101,13 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.MarkerLengthMM >= cfg.SquareLengthMM {
 		return nil, nil, fmt.Errorf("marker_length_mm (%g) must be less than square_length_mm (%g)", cfg.MarkerLengthMM, cfg.SquareLengthMM)
+	}
+	if cfg.Distortion != nil {
+		switch len(cfg.Distortion) {
+		case 4, 5, 8, 12, 14:
+		default:
+			return nil, nil, fmt.Errorf("distortion must have 4, 5, 8, 12, or 14 elements, got %d", len(cfg.Distortion))
+		}
 	}
 	return []string{cfg.Camera}, nil, nil
 }
@@ -300,8 +311,15 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 		props.IntrinsicParams.Ppx == 0 || props.IntrinsicParams.Ppy == 0 {
 		return "", fmt.Errorf("charuco: camera %q has missing or zero intrinsics — calibrate the camera first", c.cfg.Camera)
 	}
-	if props.DistortionParams == nil {
-		return "", fmt.Errorf("charuco: camera %q has no distortion parameters — populate distortion coefficients in the camera config (use zeros if unknown)", c.cfg.Camera)
+
+	var distortion []float64
+	switch {
+	case c.cfg.Distortion != nil:
+		distortion = c.cfg.Distortion
+	case props.DistortionParams != nil:
+		distortion = props.DistortionParams.Parameters()
+	default:
+		return "", fmt.Errorf("charuco: camera %q has no distortion parameters — set `distortion` on this pose_tracker (use [0,0,0,0,0] for cameras that undistort on-device like Zivid/Ensenso)", c.cfg.Camera)
 	}
 
 	payload := map[string]interface{}{
@@ -309,7 +327,7 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 		"fy":         props.IntrinsicParams.Fy,
 		"cx":         props.IntrinsicParams.Ppx,
 		"cy":         props.IntrinsicParams.Ppy,
-		"distortion": props.DistortionParams.Parameters(),
+		"distortion": distortion,
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
