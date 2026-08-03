@@ -168,39 +168,9 @@ func (h *handeye) DoCommand(
 		return h.cancel(ctx)
 	case "result":
 		return h.result()
-	case "status":
-		return h.status(), nil
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, result, or status", v)
+		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", v)
 	}
-}
-
-func (h *handeye) status() map[string]interface{} {
-	h.mu.Lock()
-	p := h.progress
-	h.mu.Unlock()
-
-	total := h.cfg.NumPoses
-	if total == 0 {
-		total = 20
-	}
-
-	resp := map[string]interface{}{
-		"state":              p.state,
-		"positions_captured": p.positionsCaptured,
-		"total_positions":    total,
-		"attempts":           p.attempts,
-	}
-	if !p.startedAt.IsZero() {
-		resp["started_at"] = p.startedAt.UTC().Format(time.RFC3339)
-	}
-	if !p.completedAt.IsZero() {
-		resp["completed_at"] = p.completedAt.UTC().Format(time.RFC3339)
-	}
-	if p.lastError != "" {
-		resp["last_error"] = p.lastError
-	}
-	return resp
 }
 
 func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error) {
@@ -513,7 +483,31 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 }
 
 func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+	h.mu.Lock()
+	p := h.progress
+	h.mu.Unlock()
+
+	total := h.cfg.NumPoses
+	if total == 0 {
+		total = 20
+	}
+
+	resp := map[string]interface{}{
+		"state":              p.state,
+		"positions_captured": p.positionsCaptured,
+		"total_positions":    total,
+		"attempts":           p.attempts,
+	}
+	if !p.startedAt.IsZero() {
+		resp["started_at"] = p.startedAt.UTC().Format(time.RFC3339)
+	}
+	if !p.completedAt.IsZero() {
+		resp["completed_at"] = p.completedAt.UTC().Format(time.RFC3339)
+	}
+	if p.lastError != "" {
+		resp["last_error"] = p.lastError
+	}
+	return resp, nil
 }
 
 func parseBoardPose(detectResp map[string]interface{}) (spatialmath.Pose, error) {
