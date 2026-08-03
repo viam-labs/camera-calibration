@@ -44,12 +44,20 @@ func init() {
 
 // Config is the handeye service configuration.
 type Config struct {
-	Arm                string                                     `json:"arm"`
-	PoseTracker        string                                     `json:"pose_tracker"`
-	NumPoses           int                                        `json:"num_poses"`
-	WorkspaceBounds    WorkspaceBounds                            `json:"workspace_bounds"`
-	SettleSeconds      float64                                    `json:"settle_seconds"`
-	InputRangeOverride map[string]map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
+	Arm                      string                                     `json:"arm"`
+	PoseTracker              string                                     `json:"pose_tracker"`
+	NumPoses                 int                                        `json:"num_poses"`
+	WorkspaceBounds          WorkspaceBounds                            `json:"workspace_bounds"`
+	SettleSeconds            float64                                    `json:"settle_seconds"`
+	InputRangeOverride       map[string]map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
+	AutoApplyResult          *bool                                      `json:"auto_apply_result,omitempty"`
+	TargetCamera             string                                     `json:"target_camera,omitempty"`
+	MaxTranslationResidualMM float64                                    `json:"max_translation_residual_mm,omitempty"`
+	MaxRotationResidualDeg   float64                                    `json:"max_rotation_residual_deg,omitempty"`
+}
+
+func (cfg *Config) autoApplyEnabled() bool {
+	return cfg.AutoApplyResult == nil || *cfg.AutoApplyResult
 }
 
 // Validate returns implicit dependencies and any config errors.
@@ -80,8 +88,19 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.SettleSeconds < 0 {
 		return nil, nil, fmt.Errorf("settle_seconds must be >= 0 (0 uses the default), got %g", cfg.SettleSeconds)
 	}
+	if cfg.MaxTranslationResidualMM < 0 {
+		return nil, nil, fmt.Errorf("max_translation_residual_mm must be >= 0 (0 uses the default), got %g", cfg.MaxTranslationResidualMM)
+	}
+	if cfg.MaxRotationResidualDeg < 0 {
+		return nil, nil, fmt.Errorf("max_rotation_residual_deg must be >= 0 (0 uses the default), got %g", cfg.MaxRotationResidualDeg)
+	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
+
+const (
+	defaultMaxTranslationResidualMM = 5.0
+	defaultMaxRotationResidualDeg   = 2.0
+)
 
 type handeye struct {
 	resource.AlwaysRebuild
@@ -125,6 +144,12 @@ func newHandeye(
 	}
 	if cfg.SettleSeconds == 0 {
 		cfg.SettleSeconds = 2.0
+	}
+	if cfg.MaxTranslationResidualMM == 0 {
+		cfg.MaxTranslationResidualMM = defaultMaxTranslationResidualMM
+	}
+	if cfg.MaxRotationResidualDeg == 0 {
+		cfg.MaxRotationResidualDeg = defaultMaxRotationResidualDeg
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
@@ -248,6 +273,17 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	result, err := h.runSolver(calibCtx, stations)
 	if err != nil {
 		return nil, fail(err)
+	}
+
+	if h.cfg.autoApplyEnabled() {
+		h.mu.Lock()
+		h.progress.state = "applying"
+		h.mu.Unlock()
+		applied, err := h.autoApply(calibCtx, result)
+		if err != nil {
+			return nil, fail(fmt.Errorf("handeye: auto-apply: %w", err))
+		}
+		result["auto_applied"] = applied
 	}
 
 	h.mu.Lock()
