@@ -206,8 +206,8 @@ func TestStatusInitialReady(t *testing.T) {
 	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "ready")
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 0)
-	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
-	test.That(t, resp["attempts"], test.ShouldEqual, 0)
+	test.That(t, resp["positions_required"], test.ShouldEqual, 20)
+	test.That(t, resp["positions_attempted"], test.ShouldEqual, 0)
 	test.That(t, resp, test.ShouldNotContainKey, "elapsed_time")
 	test.That(t, resp, test.ShouldNotContainKey, "last_error")
 	test.That(t, resp, test.ShouldNotContainKey, "translation")
@@ -221,7 +221,7 @@ func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
 		progress: progressState{state: "ready"},
 	}
 	resp := mustStatus(t, h)
-	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
+	test.That(t, resp["positions_required"], test.ShouldEqual, 20)
 }
 
 func TestStatusIncludesFailureDetails(t *testing.T) {
@@ -231,18 +231,18 @@ func TestStatusIncludesFailureDetails(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{NumPoses: 20},
 		progress: progressState{
-			state:             "failed",
-			positionsCaptured: 3,
-			attempts:          8,
-			startedAt:         failedAt.Add(-63 * time.Second),
-			completedAt:       failedAt,
-			lastError:         "handeye: something broke",
+			state:              "failed",
+			positionsCaptured:  3,
+			positionsAttempted: 8,
+			startedAt:          failedAt.Add(-63 * time.Second),
+			completedAt:        failedAt,
+			lastError:          "handeye: something broke",
 		},
 	}
 	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "failed")
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 3)
-	test.That(t, resp["attempts"], test.ShouldEqual, 8)
+	test.That(t, resp["positions_attempted"], test.ShouldEqual, 8)
 	test.That(t, resp["last_error"], test.ShouldEqual, "handeye: something broke")
 	test.That(t, resp["elapsed_time"], test.ShouldEqual, "1m 3s")
 }
@@ -254,11 +254,11 @@ func TestStatusIncludesResultWhenComplete(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{NumPoses: 20},
 		progress: progressState{
-			state:             "complete",
-			positionsCaptured: 20,
-			attempts:          22,
-			startedAt:         completedAt.Add(-3 * time.Minute),
-			completedAt:       completedAt,
+			state:              "complete",
+			positionsCaptured:  20,
+			positionsAttempted: 22,
+			startedAt:          completedAt.Add(-3 * time.Minute),
+			completedAt:        completedAt,
 		},
 		lastResult: map[string]interface{}{
 			"translation":             map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0},

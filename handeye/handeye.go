@@ -102,12 +102,12 @@ type handeye struct {
 }
 
 type progressState struct {
-	state             string
-	positionsCaptured int
-	attempts          int
-	startedAt         time.Time
-	completedAt       time.Time
-	lastError         string
+	state              string
+	positionsCaptured  int
+	positionsAttempted int
+	startedAt          time.Time
+	completedAt        time.Time
+	lastError          string
 }
 
 func newHandeye(
@@ -360,7 +360,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		}
 		attempt++
 		h.mu.Lock()
-		h.progress.attempts = attempt
+		h.progress.positionsAttempted = attempt
 		h.mu.Unlock()
 		target := nextPose()
 
@@ -493,10 +493,10 @@ func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
 	}
 
 	resp := map[string]interface{}{
-		"state":              p.state,
-		"positions_captured": p.positionsCaptured,
-		"total_positions":    total,
-		"attempts":           p.attempts,
+		"state":               p.state,
+		"positions_captured":  p.positionsCaptured,
+		"positions_required":  total,
+		"positions_attempted": p.positionsAttempted,
 	}
 	if !p.startedAt.IsZero() {
 		var elapsed time.Duration
