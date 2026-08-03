@@ -80,7 +80,7 @@ func TestDoCommandDispatch(t *testing.T) {
 		cmd     map[string]interface{}
 		wantErr string
 	}{
-		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, result, or status`},
+		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, or result`},
 		{name: "empty command rejected", cmd: map[string]interface{}{}, wantErr: "expected exactly one verb in DoCommand, got 0"},
 		{name: "multiple verbs rejected", cmd: map[string]interface{}{"calibrate": nil, "cancel": nil}, wantErr: "expected exactly one verb in DoCommand, got 2"},
 	}
@@ -195,6 +195,13 @@ func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
 	test.That(t, resp["was_running"], test.ShouldEqual, true)
 }
 
+func mustStatus(t *testing.T, h *handeye) map[string]interface{} {
+	t.Helper()
+	resp, err := h.Status(context.Background())
+	test.That(t, err, test.ShouldBeNil)
+	return resp
+}
+
 func TestStatusInitialReady(t *testing.T) {
 	h := &handeye{
 		name:     resource.Name{},
@@ -202,7 +209,7 @@ func TestStatusInitialReady(t *testing.T) {
 		cfg:      &Config{NumPoses: 20},
 		progress: progressState{state: "ready"},
 	}
-	resp := h.status()
+	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "ready")
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 0)
 	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
@@ -219,7 +226,7 @@ func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
 		cfg:      &Config{NumPoses: 0},
 		progress: progressState{state: "ready"},
 	}
-	resp := h.status()
+	resp := mustStatus(t, h)
 	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
 }
 
@@ -238,7 +245,7 @@ func TestStatusIncludesFailureDetails(t *testing.T) {
 			lastError:         "handeye: something broke",
 		},
 	}
-	resp := h.status()
+	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "failed")
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 3)
 	test.That(t, resp["attempts"], test.ShouldEqual, 8)
