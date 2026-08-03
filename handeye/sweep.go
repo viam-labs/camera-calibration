@@ -9,14 +9,14 @@ import (
 	"go.viam.com/rdk/spatialmath"
 )
 
-// AxisBounds is a [min, max] range on a single axis, in mm.
+// AxisBounds is a [min, max] range in mm.
 type AxisBounds struct {
 	Min float64 `json:"min"`
 	Max float64 `json:"max"`
 }
 
-// WorkspaceBounds constrains the region (arm base frame, mm) that
-// generated sweep poses will sample from.
+// WorkspaceBounds is the arm-base-frame sample region for generated
+// sweep poses. Values are in mm.
 type WorkspaceBounds struct {
 	X AxisBounds `json:"x"`
 	Y AxisBounds `json:"y"`
@@ -54,17 +54,11 @@ func lookAtRotation(from, target r3.Vector, rollRad float64) (*spatialmath.Rotat
 	})
 }
 
-// generatePoses samples numPoses arm-target poses aimed at `target` from
-// positions uniformly sampled within `bounds`. Roll about the optical
-// axis is uniform in [-π, π] — this breaks the AX=XB degenerate case
-// where without roll variation, all rotation axes cluster in a plane
-// perpendicular to the look-at direction.
-func generatePoses(target r3.Vector, numPoses int, bounds WorkspaceBounds, rng *rand.Rand) ([]spatialmath.Pose, error) {
-	if numPoses < 3 {
-		return nil, fmt.Errorf("numPoses must be >= 3, got %d", numPoses)
-	}
-	poses := make([]spatialmath.Pose, 0, numPoses)
-	for len(poses) < numPoses {
+// generatePose samples one arm-target pose aimed at target. Roll about the
+// optical axis is uniform in [-π, π]; without roll variation the AX=XB
+// solve is degenerate.
+func generatePose(target r3.Vector, bounds WorkspaceBounds, rng *rand.Rand) spatialmath.Pose {
+	for {
 		pos := r3.Vector{
 			X: bounds.X.Min + rng.Float64()*(bounds.X.Max-bounds.X.Min),
 			Y: bounds.Y.Min + rng.Float64()*(bounds.Y.Max-bounds.Y.Min),
@@ -78,7 +72,6 @@ func generatePoses(target r3.Vector, numPoses int, bounds WorkspaceBounds, rng *
 		if err != nil {
 			continue
 		}
-		poses = append(poses, spatialmath.NewPose(pos, rot))
+		return spatialmath.NewPose(pos, rot)
 	}
-	return poses, nil
 }
