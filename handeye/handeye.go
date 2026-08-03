@@ -147,8 +147,6 @@ func (h *handeye) DoCommand(
 	}
 }
 
-// calibrate runs seed, pose generation, and sweep. Only one calibrate
-// may run at a time; concurrent invocations error.
 func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error) {
 	calibCtx, cancel := context.WithCancel(ctx)
 	h.mu.Lock()
@@ -197,10 +195,6 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	return result, nil
 }
 
-// cancel is idempotent: if a calibrate is running, its context is cancelled
-// and arm.Stop is invoked (ctx cancellation may not reach the arm in time
-// to halt an in-flight motion). If nothing is running, it's a no-op success
-// so the caller doesn't have to check state before hitting stop.
 func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 	h.mu.Lock()
 	cancel := h.cancelFn
@@ -225,8 +219,6 @@ func (h *handeye) result() (map[string]interface{}, error) {
 	return h.lastResult, nil
 }
 
-// sweepAndCapture runs the plan/execute/settle/capture loop over each
-// target pose. Plan failures skip; execute failures halt (arm state unknown).
 func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose) ([]map[string]interface{}, error) {
 	armModel, err := h.arm.Kinematics(ctx)
 	if err != nil {
@@ -247,8 +239,6 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 
 		planErr, execErr := h.planAndExecute(ctx, fs, target)
 		if execErr != nil {
-			// Motion failure (estop, pstop, collision, comms loss, ...) —
-			// arm state is unknown, do not continue sweeping.
 			return nil, fmt.Errorf("handeye: pose %d execute failed, halting sweep: %w", i, execErr)
 		}
 		if planErr != nil {
@@ -286,9 +276,6 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 	return stations, nil
 }
 
-// planAndExecute returns (planErr, execErr) so callers can distinguish
-// "unreachable pose, safe to skip" from "motion failed mid-execution,
-// halt for safety".
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
 	armName := h.arm.Name().Name
 	currentInputs, err := h.arm.JointPositions(ctx, nil)
@@ -334,7 +321,6 @@ type seedResult struct {
 	BoardInBase   spatialmath.Pose
 }
 
-// seed reads arm pose + board detection, returning a nominal board-in-base estimate.
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	joints, err := h.arm.JointPositions(ctx, nil)
 	if err != nil {
