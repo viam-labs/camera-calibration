@@ -34,6 +34,10 @@ def solve(stations: list, method: str = "tsai") -> dict:
             "camera_in_gripper_mm": {
                 "translation": [x, y, z],
                 "rvec": [rx, ry, rz],
+            },
+            "residuals": {
+                "translation_mm": <float>,
+                "rotation_deg": <float>,
             }
         }
 
@@ -68,13 +72,49 @@ def solve(stations: list, method: str = "tsai") -> dict:
         method=_METHODS[method],
     )
 
+    trans_residual_mm, rot_residual_deg = _residuals(stations, R_cam2gripper, t_cam2gripper)
+
     rvec, _ = cv2.Rodrigues(R_cam2gripper)
     return {
         "camera_in_gripper_mm": {
             "translation": t_cam2gripper.flatten().tolist(),
             "rvec": rvec.flatten().tolist(),
-        }
+        },
+        "residuals": {
+            "translation_mm": trans_residual_mm,
+            "rotation_deg": rot_residual_deg,
+        },
     }
+
+
+def _hmat(pose: dict) -> np.ndarray:
+    R, _ = cv2.Rodrigues(np.array(pose["rvec"], dtype=np.float64))
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = pose["translation"]
+    return T
+
+
+def _residuals(stations: list, R_cam2gripper: np.ndarray, t_cam2gripper: np.ndarray) -> tuple:
+    X = np.eye(4)
+    X[:3, :3] = R_cam2gripper
+    X[:3, 3] = t_cam2gripper.flatten()
+
+    predictions = [_hmat(s["T_be"]) @ X @ _hmat(s["T_cw"]) for s in stations]
+    trans = np.array([p[:3, 3] for p in predictions])
+    mean_trans = trans.mean(axis=0)
+    trans_residual = float(np.mean(np.linalg.norm(trans - mean_trans, axis=1)))
+
+    rots = [p[:3, :3] for p in predictions]
+    R_ref = rots[0]
+    angles = []
+    for R in rots[1:]:
+        R_diff = R_ref.T @ R
+        cos_theta = float(np.clip((np.trace(R_diff) - 1) / 2, -1, 1))
+        angles.append(np.arccos(cos_theta))
+    rot_residual = float(np.degrees(np.mean(angles))) if angles else 0.0
+
+    return trans_residual, rot_residual
 
 
 def main() -> None:
