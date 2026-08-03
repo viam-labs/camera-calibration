@@ -37,6 +37,18 @@ func TestLookAtRotationDegenerateErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "coincides with target")
 }
 
+func TestWorkspaceBoundsIsZero(t *testing.T) {
+	test.That(t, WorkspaceBounds{}.IsZero(), test.ShouldBeTrue)
+	test.That(t, WorkspaceBounds{X: AxisBounds{Min: -1, Max: 1}}.IsZero(), test.ShouldBeFalse)
+}
+
+func TestDeriveDefaultBounds(t *testing.T) {
+	b := deriveDefaultBounds(r3.Vector{X: 100, Y: 500, Z: 0})
+	test.That(t, b.X, test.ShouldResemble, AxisBounds{Min: -100, Max: 300})
+	test.That(t, b.Y, test.ShouldResemble, AxisBounds{Min: 300, Max: 700})
+	test.That(t, b.Z, test.ShouldResemble, AxisBounds{Min: 250, Max: 550})
+}
+
 func TestGeneratePoseInBounds(t *testing.T) {
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
 	bounds := testBounds()
