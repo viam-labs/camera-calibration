@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,11 +44,12 @@ func init() {
 
 // Config is the attribute configuration for the handeye calibration service.
 type Config struct {
-	Arm             string          `json:"arm"`
-	PoseTracker     string          `json:"pose_tracker"`
-	NumPoses        int             `json:"num_poses"`
-	WorkspaceBounds WorkspaceBounds `json:"workspace_bounds"`
-	SettleSeconds   float64         `json:"settle_seconds"`
+	Arm                string                                     `json:"arm"`
+	PoseTracker        string                                     `json:"pose_tracker"`
+	NumPoses           int                                        `json:"num_poses"`
+	WorkspaceBounds    WorkspaceBounds                            `json:"workspace_bounds"`
+	SettleSeconds      float64                                    `json:"settle_seconds"`
+	InputRangeOverride map[string]map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
 }
 
 // Validate checks that required fields are set and returns the implicit
@@ -313,6 +316,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 	if err := fs.AddFrame(armModel, fs.World()); err != nil {
 		return nil, fmt.Errorf("handeye: build frame system: %w", err)
 	}
+	if len(h.cfg.InputRangeOverride) > 0 {
+		if err := applyJointLimits(h.logger, fs, h.cfg.InputRangeOverride); err != nil {
+			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
+		}
+	}
 
 	stations := make([]map[string]interface{}, 0, len(poses))
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
@@ -498,4 +506,57 @@ func poseToJSON(p spatialmath.Pose) map[string]interface{} {
 		"translation": []float64{pt.X, pt.Y, pt.Z},
 		"rvec":        []float64{rvec.X, rvec.Y, rvec.Z},
 	}
+}
+
+func applyJointLimits(logger logging.Logger, fs *referenceframe.FrameSystem, inputRangeOverride map[string]map[string]referenceframe.Limit) error {
+	for fName, mods := range inputRangeOverride {
+		f := fs.Frame(fName)
+		if f == nil {
+			return fmt.Errorf("frame (%s) in input_range_override doesn't exist", fName)
+		}
+		sm, ok := f.(*referenceframe.SimpleModel)
+		if !ok {
+			return fmt.Errorf("can only override joints for SimpleModel for now, not %T", f)
+		}
+
+		resolved := make(map[string]referenceframe.Limit, len(mods))
+		moveableNames := sm.MoveableFrameNames()
+		existingLimits := sm.DoF()
+		for key, limit := range mods {
+			matched := false
+			for i, name := range moveableNames {
+				if key == name || key == strconv.Itoa(i) {
+					existing := existingLimits[i]
+					tightened := referenceframe.Limit{
+						Min: math.Max(limit.Min, existing.Min),
+						Max: math.Min(limit.Max, existing.Max),
+					}
+					if tightened.Min != limit.Min || tightened.Max != limit.Max {
+						logger.Warnf(
+							"input_range_override for frame %q joint %q would loosen limits: requested [%.6f, %.6f], model declares [%.6f, %.6f]; tightening to [%.6f, %.6f]",
+							fName, name,
+							limit.Min, limit.Max,
+							existing.Min, existing.Max,
+							tightened.Min, tightened.Max,
+						)
+					}
+					resolved[name] = tightened
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("can't find mod (%s)", key)
+			}
+		}
+
+		newModel, err := referenceframe.NewModelWithLimitOverrides(sm, resolved)
+		if err != nil {
+			return err
+		}
+		if err := fs.ReplaceFrame(newModel); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package handeye
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -207,6 +208,73 @@ func TestConcurrentCalibrateRejected(t *testing.T) {
 	_, err := h.calibrate(context.Background())
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "already running")
+}
+
+func makeTestArmFS(t *testing.T) *referenceframe.FrameSystem {
+	t.Helper()
+	j0, err := referenceframe.NewRotationalFrame("j0", spatialmath.R4AA{RZ: 1}, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+	test.That(t, err, test.ShouldBeNil)
+	j1, err := referenceframe.NewRotationalFrame("j1", spatialmath.R4AA{RY: 1}, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+	test.That(t, err, test.ShouldBeNil)
+	model, err := referenceframe.NewSerialModel("arm", []referenceframe.Frame{j0, j1})
+	test.That(t, err, test.ShouldBeNil)
+	fs := referenceframe.NewEmptyFrameSystem("test")
+	test.That(t, fs.AddFrame(model, fs.World()), test.ShouldBeNil)
+	return fs
+}
+
+func TestApplyJointLimitsTightensByJointName(t *testing.T) {
+	fs := makeTestArmFS(t)
+	overrides := map[string]map[string]referenceframe.Limit{
+		"arm": {"j0": {Min: -0.5, Max: 0.5}},
+	}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	test.That(t, err, test.ShouldBeNil)
+	got := fs.Frame("arm").DoF()
+	test.That(t, got[0], test.ShouldResemble, referenceframe.Limit{Min: -0.5, Max: 0.5})
+	test.That(t, got[1], test.ShouldResemble, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+}
+
+func TestApplyJointLimitsTightensByIndex(t *testing.T) {
+	fs := makeTestArmFS(t)
+	overrides := map[string]map[string]referenceframe.Limit{
+		"arm": {"1": {Min: -0.1, Max: 0.1}},
+	}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	test.That(t, err, test.ShouldBeNil)
+	got := fs.Frame("arm").DoF()
+	test.That(t, got[1], test.ShouldResemble, referenceframe.Limit{Min: -0.1, Max: 0.1})
+}
+
+func TestApplyJointLimitsClampsLoosening(t *testing.T) {
+	fs := makeTestArmFS(t)
+	overrides := map[string]map[string]referenceframe.Limit{
+		"arm": {"j0": {Min: -10, Max: 10}},
+	}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	test.That(t, err, test.ShouldBeNil)
+	got := fs.Frame("arm").DoF()
+	test.That(t, got[0], test.ShouldResemble, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+}
+
+func TestApplyJointLimitsUnknownFrameErrors(t *testing.T) {
+	fs := makeTestArmFS(t)
+	overrides := map[string]map[string]referenceframe.Limit{
+		"bogus": {"j0": {Min: -0.5, Max: 0.5}},
+	}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "doesn't exist")
+}
+
+func TestApplyJointLimitsUnknownJointErrors(t *testing.T) {
+	fs := makeTestArmFS(t)
+	overrides := map[string]map[string]referenceframe.Limit{
+		"arm": {"bogus": {Min: -0.5, Max: 0.5}},
+	}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "can't find mod")
 }
 
 func TestSolveResponseToResult(t *testing.T) {
