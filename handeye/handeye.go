@@ -31,7 +31,7 @@ import (
 	"github.com/viam-labs/camera-calibration/pyrunner"
 )
 
-// Model is the resource model for the handeye calibration service.
+// Model is the handeye calibration service.
 var Model = resource.NewModel("viam", "camera-calibration", "handeye")
 
 func init() {
@@ -42,7 +42,7 @@ func init() {
 	)
 }
 
-// Config is the attribute configuration for the handeye calibration service.
+// Config is the handeye service configuration.
 type Config struct {
 	Arm                string                                     `json:"arm"`
 	PoseTracker        string                                     `json:"pose_tracker"`
@@ -52,8 +52,7 @@ type Config struct {
 	InputRangeOverride map[string]map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
 }
 
-// Validate checks that required fields are set and returns the implicit
-// dependencies for the service.
+// Validate returns implicit dependencies and any config errors.
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "arm")
@@ -95,8 +94,8 @@ type handeye struct {
 	solvePath string
 
 	mu         sync.Mutex
-	cancelFn   context.CancelFunc     // non-nil while calibrate is running
-	lastResult map[string]interface{} // cached result of last successful calibrate
+	cancelFn   context.CancelFunc
+	lastResult map[string]interface{}
 }
 
 func newHandeye(
@@ -189,19 +188,19 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	h.logger.Infof("handeye: seed board_in_base center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f)",
 		seedCenter.X, seedCenter.Y, seedCenter.Z, seedRvec.X, seedRvec.Y, seedRvec.Z)
 
-	//nolint:gosec // sampling for pose generation, not crypto
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	poses, err := generatePoses(seedCenter, h.cfg.NumPoses, h.cfg.WorkspaceBounds, rng)
-	if err != nil {
-		return nil, fmt.Errorf("handeye: generate poses: %w", err)
+	if h.cfg.NumPoses < 3 {
+		return nil, fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses)
 	}
 
-	stations, err := h.sweepAndCapture(calibCtx, poses)
+	//nolint:gosec // sampling for pose generation, not crypto
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	nextPose := func() spatialmath.Pose {
+		return generatePose(seedCenter, h.cfg.WorkspaceBounds, rng)
+	}
+
+	stations, err := h.sweepAndCapture(calibCtx, h.cfg.NumPoses, nextPose)
 	if err != nil {
 		return nil, fmt.Errorf("handeye: sweep: %w", err)
-	}
-	if len(stations) < h.cfg.NumPoses {
-		return nil, fmt.Errorf("handeye: captured %d of %d stations; fix setup or lower num_poses before retrying", len(stations), h.cfg.NumPoses)
 	}
 
 	result, err := h.runSolver(calibCtx, stations)
@@ -307,7 +306,7 @@ func (h *handeye) result() (map[string]interface{}, error) {
 	return h.lastResult, nil
 }
 
-func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose) ([]map[string]interface{}, error) {
+func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() spatialmath.Pose) ([]map[string]interface{}, error) {
 	armModel, err := h.arm.Kinematics(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("handeye: get arm kinematics: %w", err)
@@ -322,20 +321,23 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 		}
 	}
 
-	stations := make([]map[string]interface{}, 0, len(poses))
+	stations := make([]map[string]interface{}, 0, targetCount)
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
+	attempt := 0
 
-	for i, target := range poses {
+	for len(stations) < targetCount {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		attempt++
+		target := nextPose()
 
 		planErr, execErr := h.planAndExecute(ctx, fs, target)
 		if execErr != nil {
-			return nil, fmt.Errorf("handeye: pose %d execute failed, halting sweep: %w", i, execErr)
+			return nil, fmt.Errorf("handeye: attempt %d execute failed, halting sweep: %w", attempt, execErr)
 		}
 		if planErr != nil {
-			h.logger.Infof("handeye: pose %d unreachable, skipping: %v", i, planErr)
+			h.logger.Infof("handeye: attempt %d unreachable, skipping: %v", attempt, planErr)
 			continue
 		}
 
@@ -347,18 +349,18 @@ func (h *handeye) sweepAndCapture(ctx context.Context, poses []spatialmath.Pose)
 
 		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": map[string]interface{}{}})
 		if err != nil {
-			h.logger.Infof("handeye: pose %d detect failed, skipping: %v", i, err)
+			h.logger.Infof("handeye: attempt %d detect failed, skipping: %v", attempt, err)
 			continue
 		}
 		boardInCamera, err := parseBoardPose(detectResp)
 		if err != nil {
-			h.logger.Infof("handeye: pose %d board not detected, skipping", i)
+			h.logger.Infof("handeye: attempt %d board not detected, skipping", attempt)
 			continue
 		}
 
 		actualEndPose, err := h.arm.EndPosition(ctx, nil)
 		if err != nil {
-			return nil, fmt.Errorf("handeye: read arm pose at station %d: %w", i, err)
+			return nil, fmt.Errorf("handeye: read arm pose at attempt %d: %w", attempt, err)
 		}
 
 		stations = append(stations, map[string]interface{}{

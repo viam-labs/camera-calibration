@@ -37,16 +37,13 @@ func TestLookAtRotationDegenerateErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "coincides with target")
 }
 
-func TestGeneratePosesCountAndBounds(t *testing.T) {
+func TestGeneratePoseInBounds(t *testing.T) {
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
 	bounds := testBounds()
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible tests
 
-	poses, err := generatePoses(target, 20, bounds, rng)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, len(poses), test.ShouldEqual, 20)
-
-	for _, p := range poses {
+	for i := 0; i < 20; i++ {
+		p := generatePose(target, bounds, rng)
 		pt := p.Point()
 		test.That(t, pt.X, test.ShouldBeGreaterThanOrEqualTo, bounds.X.Min)
 		test.That(t, pt.X, test.ShouldBeLessThanOrEqualTo, bounds.X.Max)
@@ -57,14 +54,12 @@ func TestGeneratePosesCountAndBounds(t *testing.T) {
 	}
 }
 
-func TestGeneratePosesAimAtTarget(t *testing.T) {
+func TestGeneratePoseAimsAtTarget(t *testing.T) {
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible tests
 
-	poses, err := generatePoses(target, 10, testBounds(), rng)
-	test.That(t, err, test.ShouldBeNil)
-
-	for _, p := range poses {
+	for i := 0; i < 10; i++ {
+		p := generatePose(target, testBounds(), rng)
 		ov := p.Orientation().OrientationVectorRadians()
 		zDir := r3.Vector{X: ov.OX, Y: ov.OY, Z: ov.OZ}
 		expected := target.Sub(p.Point()).Normalize()
@@ -72,7 +67,7 @@ func TestGeneratePosesAimAtTarget(t *testing.T) {
 	}
 }
 
-func TestGeneratePosesRollVaries(t *testing.T) {
+func TestGeneratePoseRollVaries(t *testing.T) {
 	// Narrow bounds force near-identical positions so orientation differences
 	// come from roll variation, not position variation.
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
@@ -83,22 +78,19 @@ func TestGeneratePosesRollVaries(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible tests
 
-	poses, err := generatePoses(target, 10, bounds, rng)
-	test.That(t, err, test.ShouldBeNil)
+	poses := make([]r3.Vector, 10)
+	for i := range poses {
+		p := generatePose(target, bounds, rng)
+		ov := p.Orientation().OrientationVectorRadians()
+		poses[i] = r3.Vector{X: ov.Theta}
+	}
 
-	firstTheta := poses[0].Orientation().OrientationVectorRadians().Theta
 	someDifferent := false
 	for _, p := range poses[1:] {
-		if math.Abs(p.Orientation().OrientationVectorRadians().Theta-firstTheta) > 0.1 {
+		if math.Abs(p.X-poses[0].X) > 0.1 {
 			someDifferent = true
 			break
 		}
 	}
 	test.That(t, someDifferent, test.ShouldBeTrue)
-}
-
-func TestGeneratePosesTooFewErrors(t *testing.T) {
-	_, err := generatePoses(r3.Vector{}, 2, testBounds(), rand.New(rand.NewSource(1))) //nolint:gosec // deterministic seed for reproducible tests
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "numPoses must be >= 3")
 }
