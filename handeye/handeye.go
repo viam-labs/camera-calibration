@@ -96,6 +96,16 @@ type handeye struct {
 	mu         sync.Mutex
 	cancelFn   context.CancelFunc
 	lastResult map[string]interface{}
+	progress   progressState
+}
+
+type progressState struct {
+	state             string
+	positionsCaptured int
+	attempts          int
+	startedAt         time.Time
+	completedAt       time.Time
+	lastError         string
 }
 
 func newHandeye(
@@ -130,6 +140,7 @@ func newHandeye(
 	return &handeye{
 		name:      conf.ResourceName(),
 		logger:    logger,
+		progress:  progressState{state: "ready"},
 		cfg:       cfg,
 		arm:       a,
 		tracker:   tr,
@@ -157,9 +168,39 @@ func (h *handeye) DoCommand(
 		return h.cancel(ctx)
 	case "result":
 		return h.result()
+	case "status":
+		return h.status(), nil
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", v)
+		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, result, or status", v)
 	}
+}
+
+func (h *handeye) status() map[string]interface{} {
+	h.mu.Lock()
+	p := h.progress
+	h.mu.Unlock()
+
+	total := h.cfg.NumPoses
+	if total == 0 {
+		total = 20
+	}
+
+	resp := map[string]interface{}{
+		"state":              p.state,
+		"positions_captured": p.positionsCaptured,
+		"total_positions":    total,
+		"attempts":           p.attempts,
+	}
+	if !p.startedAt.IsZero() {
+		resp["started_at"] = p.startedAt.UTC().Format(time.RFC3339)
+	}
+	if !p.completedAt.IsZero() {
+		resp["completed_at"] = p.completedAt.UTC().Format(time.RFC3339)
+	}
+	if p.lastError != "" {
+		resp["last_error"] = p.lastError
+	}
+	return resp
 }
 
 func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error) {
@@ -179,9 +220,22 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		h.mu.Unlock()
 	}()
 
+	h.mu.Lock()
+	h.progress = progressState{state: "capturing", startedAt: time.Now()}
+	h.mu.Unlock()
+
+	fail := func(err error) error {
+		h.mu.Lock()
+		h.progress.state = "failed"
+		h.progress.completedAt = time.Now()
+		h.progress.lastError = err.Error()
+		h.mu.Unlock()
+		return err
+	}
+
 	seedRes, err := h.seed(calibCtx)
 	if err != nil {
-		return nil, fmt.Errorf("handeye: seed: %w", err)
+		return nil, fail(fmt.Errorf("handeye: seed: %w", err))
 	}
 	seedCenter := seedRes.BoardInBase.Point()
 	seedRvec := seedRes.BoardInBase.Orientation().AxisAngles().ToR3()
@@ -189,7 +243,7 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		seedCenter.X, seedCenter.Y, seedCenter.Z, seedRvec.X, seedRvec.Y, seedRvec.Z)
 
 	if h.cfg.NumPoses < 3 {
-		return nil, fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses)
+		return nil, fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
 	}
 
 	//nolint:gosec // sampling for pose generation, not crypto
@@ -200,16 +254,22 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 
 	stations, err := h.sweepAndCapture(calibCtx, h.cfg.NumPoses, nextPose)
 	if err != nil {
-		return nil, fmt.Errorf("handeye: sweep: %w", err)
+		return nil, fail(fmt.Errorf("handeye: sweep: %w", err))
 	}
+
+	h.mu.Lock()
+	h.progress.state = "solving"
+	h.mu.Unlock()
 
 	result, err := h.runSolver(calibCtx, stations)
 	if err != nil {
-		return nil, err
+		return nil, fail(err)
 	}
 
 	h.mu.Lock()
 	h.lastResult = result
+	h.progress.state = "complete"
+	h.progress.completedAt = time.Now()
 	h.mu.Unlock()
 	return result, nil
 }
@@ -330,6 +390,9 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, err
 		}
 		attempt++
+		h.mu.Lock()
+		h.progress.attempts = attempt
+		h.mu.Unlock()
 		target := nextPose()
 
 		planErr, execErr := h.planAndExecute(ctx, fs, target)
@@ -367,6 +430,9 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			"T_be": poseToJSON(actualEndPose),
 			"T_cw": poseToJSON(boardInCamera),
 		})
+		h.mu.Lock()
+		h.progress.positionsCaptured = len(stations)
+		h.mu.Unlock()
 	}
 	return stations, nil
 }
