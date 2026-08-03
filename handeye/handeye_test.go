@@ -59,68 +59,39 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-func TestDoCommand(t *testing.T) {
+func TestDoCommandDispatch(t *testing.T) {
 	tests := []struct {
 		name    string
 		cmd     map[string]interface{}
 		wantErr string
 	}{
-		{
-			name:    "calibrate returns not implemented",
-			cmd:     map[string]interface{}{"calibrate": nil},
-			wantErr: "handeye calibration: not implemented",
-		},
-		{
-			name:    "cancel returns not implemented",
-			cmd:     map[string]interface{}{"cancel": nil},
-			wantErr: "handeye calibration: not implemented",
-		},
-		{
-			name:    "result returns not implemented",
-			cmd:     map[string]interface{}{"result": nil},
-			wantErr: "handeye calibration: not implemented",
-		},
-		{
-			name:    "unknown verb rejected",
-			cmd:     map[string]interface{}{"bogus": nil},
-			wantErr: `unknown verb "bogus"; expected calibrate, cancel, or result`,
-		},
-		{
-			name:    "empty command rejected",
-			cmd:     map[string]interface{}{},
-			wantErr: "expected exactly one verb in DoCommand, got 0",
-		},
-		{
-			name:    "multiple verbs rejected",
-			cmd:     map[string]interface{}{"calibrate": nil, "cancel": nil},
-			wantErr: "expected exactly one verb in DoCommand, got 2",
-		},
+		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, or result`},
+		{name: "empty command rejected", cmd: map[string]interface{}{}, wantErr: "expected exactly one verb in DoCommand, got 0"},
+		{name: "multiple verbs rejected", cmd: map[string]interface{}{"calibrate": nil, "cancel": nil}, wantErr: "expected exactly one verb in DoCommand, got 2"},
 	}
-
-	h := &handeye{
-		name:   resource.Name{},
-		logger: logging.NewTestLogger(t),
-	}
-
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t)}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp, err := h.DoCommand(context.Background(), tt.cmd)
-			test.That(t, resp, test.ShouldBeNil)
+			_, err := h.DoCommand(context.Background(), tt.cmd)
 			test.That(t, err, test.ShouldNotBeNil)
 			test.That(t, err.Error(), test.ShouldEqual, tt.wantErr)
 		})
 	}
 }
 
-func TestSeedReturnsExpectedShape(t *testing.T) {
+func mockArm() *inject.Arm {
 	a := &inject.Arm{}
 	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
 		return []referenceframe.Input{0.1, 0.2, 0.3}, nil
 	}
 	a.EndPositionFunc = func(_ context.Context, _ map[string]interface{}) (spatialmath.Pose, error) {
-		return spatialmath.NewPoseFromPoint(r3.Vector{X: 100, Y: 200, Z: 300}), nil
+		return spatialmath.NewPoseFromPoint(r3.Vector{X: 100, Y: 0, Z: 300}), nil
 	}
+	a.StopFunc = func(_ context.Context, _ map[string]interface{}) error { return nil }
+	return a
+}
 
+func mockTracker() *inject.PoseTracker {
 	tr := &inject.PoseTracker{}
 	tr.DoFunc = func(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
 		return map[string]interface{}{
@@ -130,48 +101,95 @@ func TestSeedReturnsExpectedShape(t *testing.T) {
 			},
 		}, nil
 	}
+	return tr
+}
 
+func TestSeedReturnsExpectedShape(t *testing.T) {
 	h := &handeye{
 		name:    resource.Name{},
 		logger:  logging.NewTestLogger(t),
-		arm:     a,
-		tracker: tr,
+		arm:     mockArm(),
+		tracker: mockTracker(),
 	}
-
 	resp, err := h.seed(context.Background())
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, resp["arm_joints_rad"], test.ShouldResemble, []float64{0.1, 0.2, 0.3})
-	test.That(t, resp["arm_end_position_mm"], test.ShouldNotBeNil)
-	test.That(t, resp["board_pose_in_camera_mm"], test.ShouldNotBeNil)
-	test.That(t, resp["board_pose_in_base_mm"], test.ShouldNotBeNil)
+	test.That(t, resp.ArmJoints, test.ShouldResemble, []float64{0.1, 0.2, 0.3})
+	test.That(t, resp.ArmEndPose, test.ShouldNotBeNil)
+	test.That(t, resp.BoardInCamera, test.ShouldNotBeNil)
+	test.That(t, resp.BoardInBase, test.ShouldNotBeNil)
 }
 
 func TestSeedBoardNotDetectedErrors(t *testing.T) {
-	a := &inject.Arm{}
-	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
-		return []referenceframe.Input{0}, nil
-	}
-	a.EndPositionFunc = func(_ context.Context, _ map[string]interface{}) (spatialmath.Pose, error) {
-		return spatialmath.NewZeroPose(), nil
-	}
-
 	tr := &inject.PoseTracker{}
 	tr.DoFunc = func(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
-		return map[string]interface{}{
-			"num_detected":  0,
-			"corners":       []interface{}{},
-			"board_pose_mm": nil,
-		}, nil
+		return map[string]interface{}{"board_pose_mm": nil}, nil
 	}
-
 	h := &handeye{
 		name:    resource.Name{},
 		logger:  logging.NewTestLogger(t),
-		arm:     a,
+		arm:     mockArm(),
 		tracker: tr,
 	}
-
 	_, err := h.seed(context.Background())
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "board not detected")
+}
+
+func TestResultBeforeCalibrateErrors(t *testing.T) {
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t)}
+	_, err := h.result()
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "no calibrate has completed yet")
+}
+
+func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {
+	stopCalled := false
+	a := &inject.Arm{}
+	a.StopFunc = func(_ context.Context, _ map[string]interface{}) error {
+		stopCalled = true
+		return nil
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	resp, err := h.cancel(context.Background())
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, resp["cancelled"], test.ShouldEqual, true)
+	test.That(t, resp["was_running"], test.ShouldEqual, false)
+	test.That(t, stopCalled, test.ShouldBeFalse)
+}
+
+func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
+	stopCalled := false
+	a := &inject.Arm{}
+	a.StopFunc = func(_ context.Context, _ map[string]interface{}) error {
+		stopCalled = true
+		return nil
+	}
+
+	cancelCalled := false
+	h := &handeye{
+		name:     resource.Name{},
+		logger:   logging.NewTestLogger(t),
+		arm:      a,
+		cancelFn: func() { cancelCalled = true },
+	}
+
+	resp, err := h.cancel(context.Background())
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, cancelCalled, test.ShouldBeTrue)
+	test.That(t, stopCalled, test.ShouldBeTrue)
+	test.That(t, resp["was_running"], test.ShouldEqual, true)
+}
+
+func TestConcurrentCalibrateRejected(t *testing.T) {
+	// Simulate a running calibrate by pre-setting cancelFn. calibrate must
+	// error before touching arm/tracker, so no arm mocks are needed.
+	_, existing := context.WithCancel(context.Background())
+	h := &handeye{
+		name:     resource.Name{},
+		logger:   logging.NewTestLogger(t),
+		cancelFn: existing,
+	}
+	_, err := h.calibrate(context.Background())
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "already running")
 }

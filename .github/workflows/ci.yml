@@ -16,6 +16,9 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      - name: Install system deps (nlopt for armplanning)
+        run: bash ./setup.sh
+
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
@@ -30,11 +33,8 @@ jobs:
           go-version: '1.25'
           cache: true
 
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Setup Python venv
-        run: make venv
+      - name: Setup (system deps + venv)
+        run: make setup
 
       - name: Build
         run: make build
