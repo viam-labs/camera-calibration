@@ -63,16 +63,18 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.NumPoses != 0 && cfg.NumPoses < 3 {
 		return nil, nil, fmt.Errorf("num_poses must be >= 3 (or 0 for the default), got %d", cfg.NumPoses)
 	}
-	for _, axis := range []struct {
-		name string
-		b    AxisBounds
-	}{
-		{"x", cfg.WorkspaceBounds.X},
-		{"y", cfg.WorkspaceBounds.Y},
-		{"z", cfg.WorkspaceBounds.Z},
-	} {
-		if axis.b.Min >= axis.b.Max {
-			return nil, nil, fmt.Errorf("workspace_bounds.%s.min (%g) must be < max (%g)", axis.name, axis.b.Min, axis.b.Max)
+	if !cfg.WorkspaceBounds.IsZero() {
+		for _, axis := range []struct {
+			name string
+			b    AxisBounds
+		}{
+			{"x", cfg.WorkspaceBounds.X},
+			{"y", cfg.WorkspaceBounds.Y},
+			{"z", cfg.WorkspaceBounds.Z},
+		} {
+			if axis.b.Min >= axis.b.Max {
+				return nil, nil, fmt.Errorf("workspace_bounds.%s.min (%g) must be < max (%g); to auto-derive, omit the whole workspace_bounds block", axis.name, axis.b.Min, axis.b.Max)
+			}
 		}
 	}
 	if cfg.SettleSeconds < 0 {
@@ -215,10 +217,17 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		return nil, fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
 	}
 
+	bounds := h.cfg.WorkspaceBounds
+	if bounds.IsZero() {
+		bounds = deriveDefaultBounds(seedCenter)
+		h.logger.Infof("handeye: auto-derived workspace_bounds x=[%.1f, %.1f] y=[%.1f, %.1f] z=[%.1f, %.1f]",
+			bounds.X.Min, bounds.X.Max, bounds.Y.Min, bounds.Y.Max, bounds.Z.Min, bounds.Z.Max)
+	}
+
 	//nolint:gosec // sampling for pose generation, not crypto
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	nextPose := func() spatialmath.Pose {
-		return generatePose(seedCenter, h.cfg.WorkspaceBounds, rng)
+		return generatePose(seedCenter, bounds, rng)
 	}
 
 	stations, err := h.sweepAndCapture(calibCtx, h.cfg.NumPoses, nextPose)

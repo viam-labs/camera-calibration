@@ -23,6 +23,21 @@ type WorkspaceBounds struct {
 	Z AxisBounds `json:"z"`
 }
 
+// IsZero reports whether every axis is at its zero value (i.e., the
+// caller omitted workspace_bounds from config and we should auto-derive).
+func (w WorkspaceBounds) IsZero() bool {
+	zero := AxisBounds{}
+	return w.X == zero && w.Y == zero && w.Z == zero
+}
+
+func deriveDefaultBounds(boardCenter r3.Vector) WorkspaceBounds {
+	return WorkspaceBounds{
+		X: AxisBounds{Min: boardCenter.X - 200, Max: boardCenter.X + 200},
+		Y: AxisBounds{Min: boardCenter.Y - 200, Max: boardCenter.Y + 200},
+		Z: AxisBounds{Min: boardCenter.Z + 250, Max: boardCenter.Z + 550},
+	}
+}
+
 // lookAtRotation builds a rotation whose local +Z axis points from `from`
 // toward `target`, with an additional `rollRad` rotation about that axis.
 // The returned matrix rotates local (camera) vectors into `from`/`target`'s frame.
