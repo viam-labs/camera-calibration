@@ -61,11 +61,8 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.PoseTracker == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "pose_tracker")
 	}
-	if cfg.NumPoses == 0 {
-		cfg.NumPoses = 20
-	}
-	if cfg.NumPoses < 3 {
-		return nil, nil, fmt.Errorf("num_poses must be >= 3, got %d", cfg.NumPoses)
+	if cfg.NumPoses != 0 && cfg.NumPoses < 3 {
+		return nil, nil, fmt.Errorf("num_poses must be >= 3 (or 0 for the default), got %d", cfg.NumPoses)
 	}
 	for _, axis := range []struct {
 		name string
@@ -79,11 +76,8 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 			return nil, nil, fmt.Errorf("workspace_bounds.%s.min (%g) must be < max (%g)", axis.name, axis.b.Min, axis.b.Max)
 		}
 	}
-	if cfg.SettleSeconds == 0 {
-		cfg.SettleSeconds = 2.0
-	}
 	if cfg.SettleSeconds < 0 {
-		return nil, nil, fmt.Errorf("settle_seconds must be > 0, got %g", cfg.SettleSeconds)
+		return nil, nil, fmt.Errorf("settle_seconds must be >= 0 (0 uses the default), got %g", cfg.SettleSeconds)
 	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
@@ -114,6 +108,12 @@ func newHandeye(
 	cfg, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.NumPoses == 0 {
+		cfg.NumPoses = 20
+	}
+	if cfg.SettleSeconds == 0 {
+		cfg.SettleSeconds = 2.0
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
