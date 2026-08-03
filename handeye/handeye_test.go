@@ -261,14 +261,14 @@ func TestStatusIncludesResultWhenComplete(t *testing.T) {
 			completedAt:       completedAt,
 		},
 		lastResult: map[string]interface{}{
-			"translation":             map[string]float64{"x": 1.0, "y": 2.0, "z": 3.0},
+			"translation":             map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0},
 			"translation_residual_mm": 0.5,
 		},
 	}
 	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "complete")
 	test.That(t, resp["elapsed_time"], test.ShouldEqual, "3m 0s")
-	test.That(t, resp["translation"], test.ShouldResemble, map[string]float64{"x": 1.0, "y": 2.0, "z": 3.0})
+	test.That(t, resp["translation"], test.ShouldResemble, map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0})
 	test.That(t, resp["translation_residual_mm"], test.ShouldEqual, 0.5)
 }
 
@@ -370,7 +370,7 @@ func TestSolveResponseToResult(t *testing.T) {
 
 	result := resp.toResult()
 
-	trans, ok := result["translation"].(map[string]float64)
+	trans, ok := result["translation"].(map[string]interface{})
 	test.That(t, ok, test.ShouldBeTrue)
 	test.That(t, trans["x"], test.ShouldEqual, 10.0)
 	test.That(t, trans["y"], test.ShouldEqual, 20.0)
@@ -379,7 +379,7 @@ func TestSolveResponseToResult(t *testing.T) {
 	orient, ok := result["orientation"].(map[string]interface{})
 	test.That(t, ok, test.ShouldBeTrue)
 	test.That(t, orient["type"], test.ShouldEqual, "ov_degrees")
-	ovValue, ok := orient["value"].(map[string]float64)
+	ovValue, ok := orient["value"].(map[string]interface{})
 	test.That(t, ok, test.ShouldBeTrue)
 	test.That(t, ovValue, test.ShouldContainKey, "x")
 	test.That(t, ovValue, test.ShouldContainKey, "y")

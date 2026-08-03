@@ -268,10 +268,10 @@ func (s *solveResponse) toResult() map[string]interface{} {
 	rvec := r3.Vector{X: s.CameraInGripperMM.Rvec[0], Y: s.CameraInGripperMM.Rvec[1], Z: s.CameraInGripperMM.Rvec[2]}
 	ovd := spatialmath.R3ToR4(rvec).OrientationVectorDegrees()
 	return map[string]interface{}{
-		"translation": map[string]float64{"x": t[0], "y": t[1], "z": t[2]},
+		"translation": map[string]interface{}{"x": t[0], "y": t[1], "z": t[2]},
 		"orientation": map[string]interface{}{
 			"type": "ov_degrees",
-			"value": map[string]float64{
+			"value": map[string]interface{}{
 				"x":  ovd.OX,
 				"y":  ovd.OY,
 				"z":  ovd.OZ,
