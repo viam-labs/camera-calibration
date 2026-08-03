@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
@@ -79,7 +80,7 @@ func TestDoCommandDispatch(t *testing.T) {
 		cmd     map[string]interface{}
 		wantErr string
 	}{
-		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, or result`},
+		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, result, or status`},
 		{name: "empty command rejected", cmd: map[string]interface{}{}, wantErr: "expected exactly one verb in DoCommand, got 0"},
 		{name: "multiple verbs rejected", cmd: map[string]interface{}{"calibrate": nil, "cancel": nil}, wantErr: "expected exactly one verb in DoCommand, got 2"},
 	}
@@ -192,6 +193,58 @@ func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
 	test.That(t, cancelCalled, test.ShouldBeTrue)
 	test.That(t, stopCalled, test.ShouldBeTrue)
 	test.That(t, resp["was_running"], test.ShouldEqual, true)
+}
+
+func TestStatusInitialReady(t *testing.T) {
+	h := &handeye{
+		name:     resource.Name{},
+		logger:   logging.NewTestLogger(t),
+		cfg:      &Config{NumPoses: 20},
+		progress: progressState{state: "ready"},
+	}
+	resp := h.status()
+	test.That(t, resp["state"], test.ShouldEqual, "ready")
+	test.That(t, resp["positions_captured"], test.ShouldEqual, 0)
+	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
+	test.That(t, resp["attempts"], test.ShouldEqual, 0)
+	test.That(t, resp, test.ShouldNotContainKey, "started_at")
+	test.That(t, resp, test.ShouldNotContainKey, "completed_at")
+	test.That(t, resp, test.ShouldNotContainKey, "last_error")
+}
+
+func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
+	h := &handeye{
+		name:     resource.Name{},
+		logger:   logging.NewTestLogger(t),
+		cfg:      &Config{NumPoses: 0},
+		progress: progressState{state: "ready"},
+	}
+	resp := h.status()
+	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
+}
+
+func TestStatusIncludesFailureDetails(t *testing.T) {
+	failedAt := time.Date(2026, 8, 3, 14, 46, 36, 0, time.UTC)
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{NumPoses: 20},
+		progress: progressState{
+			state:             "failed",
+			positionsCaptured: 3,
+			attempts:          8,
+			startedAt:         failedAt.Add(-time.Minute),
+			completedAt:       failedAt,
+			lastError:         "handeye: something broke",
+		},
+	}
+	resp := h.status()
+	test.That(t, resp["state"], test.ShouldEqual, "failed")
+	test.That(t, resp["positions_captured"], test.ShouldEqual, 3)
+	test.That(t, resp["attempts"], test.ShouldEqual, 8)
+	test.That(t, resp["last_error"], test.ShouldEqual, "handeye: something broke")
+	test.That(t, resp["completed_at"], test.ShouldEqual, "2026-08-03T14:46:36Z")
+	test.That(t, resp["started_at"], test.ShouldEqual, "2026-08-03T14:45:36Z")
 }
 
 func TestConcurrentCalibrateRejected(t *testing.T) {
