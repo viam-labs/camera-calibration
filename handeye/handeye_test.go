@@ -80,7 +80,7 @@ func TestDoCommandDispatch(t *testing.T) {
 		cmd     map[string]interface{}
 		wantErr string
 	}{
-		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, or result`},
+		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate or cancel`},
 		{name: "empty command rejected", cmd: map[string]interface{}{}, wantErr: "expected exactly one verb in DoCommand, got 0"},
 		{name: "multiple verbs rejected", cmd: map[string]interface{}{"calibrate": nil, "cancel": nil}, wantErr: "expected exactly one verb in DoCommand, got 2"},
 	}
@@ -150,13 +150,6 @@ func TestSeedBoardNotDetectedErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "board not detected")
 }
 
-func TestResultBeforeCalibrateErrors(t *testing.T) {
-	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t)}
-	_, err := h.result()
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "no calibrate has completed yet")
-}
-
 func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {
 	stopCalled := false
 	a := &inject.Arm{}
@@ -214,9 +207,9 @@ func TestStatusInitialReady(t *testing.T) {
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 0)
 	test.That(t, resp["total_positions"], test.ShouldEqual, 20)
 	test.That(t, resp["attempts"], test.ShouldEqual, 0)
-	test.That(t, resp, test.ShouldNotContainKey, "started_at")
-	test.That(t, resp, test.ShouldNotContainKey, "completed_at")
+	test.That(t, resp, test.ShouldNotContainKey, "elapsed_time")
 	test.That(t, resp, test.ShouldNotContainKey, "last_error")
+	test.That(t, resp, test.ShouldNotContainKey, "translation")
 }
 
 func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
@@ -231,7 +224,7 @@ func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
 }
 
 func TestStatusIncludesFailureDetails(t *testing.T) {
-	failedAt := time.Date(2026, 8, 3, 14, 46, 36, 0, time.UTC)
+	failedAt := time.Now()
 	h := &handeye{
 		name:   resource.Name{},
 		logger: logging.NewTestLogger(t),
@@ -240,7 +233,7 @@ func TestStatusIncludesFailureDetails(t *testing.T) {
 			state:             "failed",
 			positionsCaptured: 3,
 			attempts:          8,
-			startedAt:         failedAt.Add(-time.Minute),
+			startedAt:         failedAt.Add(-63 * time.Second),
 			completedAt:       failedAt,
 			lastError:         "handeye: something broke",
 		},
@@ -250,8 +243,40 @@ func TestStatusIncludesFailureDetails(t *testing.T) {
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 3)
 	test.That(t, resp["attempts"], test.ShouldEqual, 8)
 	test.That(t, resp["last_error"], test.ShouldEqual, "handeye: something broke")
-	test.That(t, resp["completed_at"], test.ShouldEqual, "2026-08-03T14:46:36Z")
-	test.That(t, resp["started_at"], test.ShouldEqual, "2026-08-03T14:45:36Z")
+	test.That(t, resp["elapsed_time"], test.ShouldEqual, "1m 3s")
+}
+
+func TestStatusIncludesResultWhenComplete(t *testing.T) {
+	completedAt := time.Now()
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{NumPoses: 20},
+		progress: progressState{
+			state:             "complete",
+			positionsCaptured: 20,
+			attempts:          22,
+			startedAt:         completedAt.Add(-3 * time.Minute),
+			completedAt:       completedAt,
+		},
+		lastResult: map[string]interface{}{
+			"translation":             map[string]float64{"x": 1.0, "y": 2.0, "z": 3.0},
+			"translation_residual_mm": 0.5,
+		},
+	}
+	resp := mustStatus(t, h)
+	test.That(t, resp["state"], test.ShouldEqual, "complete")
+	test.That(t, resp["elapsed_time"], test.ShouldEqual, "3m 0s")
+	test.That(t, resp["translation"], test.ShouldResemble, map[string]float64{"x": 1.0, "y": 2.0, "z": 3.0})
+	test.That(t, resp["translation_residual_mm"], test.ShouldEqual, 0.5)
+}
+
+func TestFormatElapsed(t *testing.T) {
+	test.That(t, formatElapsed(45*time.Second), test.ShouldEqual, "45s")
+	test.That(t, formatElapsed(63*time.Second), test.ShouldEqual, "1m 3s")
+	test.That(t, formatElapsed(3*time.Minute), test.ShouldEqual, "3m 0s")
+	test.That(t, formatElapsed(3*time.Minute+15*time.Second), test.ShouldEqual, "3m 15s")
+	test.That(t, formatElapsed(time.Hour+5*time.Minute+12*time.Second), test.ShouldEqual, "1h 5m 12s")
 }
 
 func TestConcurrentCalibrateRejected(t *testing.T) {

@@ -166,10 +166,8 @@ func (h *handeye) DoCommand(
 		return h.calibrate(ctx)
 	case "cancel":
 		return h.cancel(ctx)
-	case "result":
-		return h.result()
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or result", v)
+		return nil, fmt.Errorf("unknown verb %q; expected calibrate or cancel", v)
 	}
 }
 
@@ -192,6 +190,7 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 
 	h.mu.Lock()
 	h.progress = progressState{state: "capturing", startedAt: time.Now()}
+	h.lastResult = nil
 	h.mu.Unlock()
 
 	fail := func(err error) error {
@@ -325,15 +324,6 @@ func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 		h.logger.Warnf("handeye: arm.Stop failed during cancel: %v", err)
 	}
 	return map[string]interface{}{"cancelled": true, "was_running": true}, nil
-}
-
-func (h *handeye) result() (map[string]interface{}, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.lastResult == nil {
-		return nil, errors.New("handeye: no calibrate has completed yet")
-	}
-	return h.lastResult, nil
 }
 
 func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() spatialmath.Pose) ([]map[string]interface{}, error) {
@@ -485,6 +475,7 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
 	h.mu.Lock()
 	p := h.progress
+	result := h.lastResult
 	h.mu.Unlock()
 
 	total := h.cfg.NumPoses
@@ -499,15 +490,40 @@ func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
 		"attempts":           p.attempts,
 	}
 	if !p.startedAt.IsZero() {
-		resp["started_at"] = p.startedAt.UTC().Format(time.RFC3339)
-	}
-	if !p.completedAt.IsZero() {
-		resp["completed_at"] = p.completedAt.UTC().Format(time.RFC3339)
+		var elapsed time.Duration
+		if p.completedAt.IsZero() {
+			elapsed = time.Since(p.startedAt)
+		} else {
+			elapsed = p.completedAt.Sub(p.startedAt)
+		}
+		resp["elapsed_time"] = formatElapsed(elapsed)
 	}
 	if p.lastError != "" {
 		resp["last_error"] = p.lastError
 	}
+	if p.state == "complete" && result != nil {
+		for k, v := range result {
+			resp[k] = v
+		}
+	}
 	return resp, nil
+}
+
+func formatElapsed(d time.Duration) string {
+	d = d.Round(time.Second)
+	hours := int(d / time.Hour)
+	d -= time.Duration(hours) * time.Hour
+	mins := int(d / time.Minute)
+	d -= time.Duration(mins) * time.Minute
+	secs := int(d / time.Second)
+	switch {
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm %ds", hours, mins, secs)
+	case mins > 0:
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
 }
 
 func parseBoardPose(detectResp map[string]interface{}) (spatialmath.Pose, error) {
