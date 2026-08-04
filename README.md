@@ -11,7 +11,7 @@ This module figures out where your camera sits relative to the arm's tool flange
 ## Prerequisites
 
 - Arm component configured on the machine.
-- Camera component configured (its `frame` doesn't have to be correct - that's what this module fixes).
+- Camera component configured, with its `frame.parent` set to the arm's name. Translation and orientation don't have to be correct - that's what this module fixes - but the parent must be the arm since the camera physically moves with it.
 - Any obstacles the arm might hit during the sweep modeled as components with geometry.
 
 ## Quick Start
