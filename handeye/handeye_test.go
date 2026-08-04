@@ -234,6 +234,28 @@ func TestCheckStartingJointsErrorsWhenOutOfBounds(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "1.6992")
 }
 
+func TestCheckArmHealthPassesWhenJointPositionsSucceeds(t *testing.T) {
+	a := &inject.Arm{}
+	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
+		return []referenceframe.Input{0.1, 0.2, 0.3}, nil
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	test.That(t, h.checkArmHealth(context.Background(), 5), test.ShouldBeNil)
+}
+
+func TestCheckArmHealthErrorsWhenJointPositionsFails(t *testing.T) {
+	a := &inject.Arm{}
+	a.JointPositionsFunc = func(_ context.Context, _ map[string]interface{}) ([]referenceframe.Input, error) {
+		return nil, errors.New("arm comms error")
+	}
+	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
+	err := h.checkArmHealth(context.Background(), 7)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "attempt 7")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "pstop, estop, or disconnected")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "arm comms error")
+}
+
 func TestCheckStartingJointsSupportsJointNameKeys(t *testing.T) {
 	h := &handeye{
 		name:   resource.Name{},
