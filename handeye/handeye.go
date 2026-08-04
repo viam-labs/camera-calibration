@@ -407,6 +407,13 @@ func (h *handeye) checkStartingJointsInBounds(ctx context.Context, joints []refe
 	return nil
 }
 
+func (h *handeye) checkArmHealth(ctx context.Context, attempt int) error {
+	if _, err := h.arm.JointPositions(ctx, nil); err != nil {
+		return fmt.Errorf("handeye: attempt %d arm health check failed, halting sweep (arm may be in pstop, estop, or disconnected): %w", attempt, err)
+	}
+	return nil
+}
+
 func (h *handeye) returnToStartingPose(ctx, calibCtx context.Context, joints []referenceframe.Input) {
 	if calibCtx.Err() != nil {
 		return
@@ -460,6 +467,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Lock()
 		h.progress.positionsAttempted = attempt
 		h.mu.Unlock()
+
+		if err := h.checkArmHealth(ctx, attempt); err != nil {
+			return nil, err
+		}
+
 		target := nextPose()
 
 		planErr, execErr := h.planAndExecute(ctx, fs, target)
