@@ -491,8 +491,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 
 		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": map[string]interface{}{}})
 		if err != nil {
-			h.logger.Infof("handeye: attempt %d detect failed, skipping: %v", attempt, err)
-			continue
+			return nil, fmt.Errorf("handeye: attempt %d halted: %w", attempt, err)
 		}
 		boardInCamera, err := parseBoardPose(detectResp)
 		if err != nil {
