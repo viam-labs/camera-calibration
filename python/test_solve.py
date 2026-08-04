@@ -87,6 +87,23 @@ def test_residuals_near_zero_for_synthetic():
     assert result["residuals"]["rotation_deg"] < 0.1
 
 
+def test_pose_diversity_reported():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=15)
+    result = solve(stations, method="tsai")
+    diversity = result["residuals"]["pose_diversity_deg"]
+    assert diversity > 0, "diverse synthetic stations should have non-zero pose diversity"
+
+
+def test_pose_diversity_near_zero_for_identical_rotations():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=5)
+    for s in stations:
+        s["T_be"]["rvec"] = [0.0, 0.0, 0.0]
+    result = solve(stations, method="tsai")
+    assert result["residuals"]["pose_diversity_deg"] < 0.01
+
+
 def test_insufficient_stations_raises():
     x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
     stations = _synthetic_stations(x_true, n_stations=2)

@@ -150,6 +150,7 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
 | `target_camera`               | No       | derived | Override which camera's `frame` block gets updated.                           |
 | `max_translation_residual_mm` | No       | 5.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
+| `min_pose_diversity_deg`      | No       | 30.0    | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
 
 
 

@@ -63,6 +63,40 @@ func TestPassesResidualThresholdsOverRotation(t *testing.T) {
 	test.That(t, pass, test.ShouldBeFalse)
 }
 
+func TestPassesPoseDiversityAboveThreshold(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MinPoseDiversityDeg: 30.0},
+	}
+	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{
+		"pose_diversity_deg": 96.0,
+	})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, pass, test.ShouldBeTrue)
+}
+
+func TestPassesPoseDiversityBelowThreshold(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MinPoseDiversityDeg: 30.0},
+	}
+	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{
+		"pose_diversity_deg": 12.5,
+	})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, pass, test.ShouldBeFalse)
+}
+
+func TestPassesPoseDiversityMissingFieldErrors(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MinPoseDiversityDeg: 30.0},
+	}
+	_, err := h.passesPoseDiversityThreshold(map[string]interface{}{})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "pose_diversity_deg")
+}
+
 func TestPassesResidualThresholdsMissingFieldErrors(t *testing.T) {
 	h := &handeye{
 		logger: logging.NewTestLogger(t),

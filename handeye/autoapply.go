@@ -11,11 +11,14 @@ import (
 )
 
 func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) (bool, error) {
-	pass, err := h.passesResidualThresholds(result)
-	if err != nil {
+	if pass, err := h.passesPoseDiversityThreshold(result); err != nil {
 		return false, err
+	} else if !pass {
+		return false, nil
 	}
-	if !pass {
+	if pass, err := h.passesResidualThresholds(result); err != nil {
+		return false, err
+	} else if !pass {
 		return false, nil
 	}
 
@@ -54,6 +57,21 @@ func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) 
 		return false, fmt.Errorf("update robot part: %w", err)
 	}
 	h.logger.Infof("handeye: auto-applied calibrated frame to camera %q", targetCamera)
+	return true, nil
+}
+
+func (h *handeye) passesPoseDiversityThreshold(result map[string]interface{}) (bool, error) {
+	diversity, ok := result["pose_diversity_deg"].(float64)
+	if !ok {
+		return false, errors.New("solve result missing pose_diversity_deg")
+	}
+	if diversity < h.cfg.MinPoseDiversityDeg {
+		h.logger.Warnf(
+			"handeye: pose diversity (%.2f°) below threshold (%.2f°); skipping auto-apply — arm rotations too clustered for a well-determined solve",
+			diversity, h.cfg.MinPoseDiversityDeg,
+		)
+		return false, nil
+	}
 	return true, nil
 }
 
