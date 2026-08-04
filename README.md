@@ -1,8 +1,12 @@
 # camera-calibration
 
-**Hand-eye calibration** for arm-mounted cameras on Viam machines. Sweep, detect a board, solve, and **write the calibrated frame back to your camera config - automatically**.
+**Hand-eye calibration** for arm-mounted cameras on Viam machines.
 
 The goal is fast, good-enough calibration. If a few millimeters of error is fine for your use case, the [Quick Start](#quick-start) gets you there in ~5 minutes. If you need sub-mm precision, you'll need to pay more attention to the quality of the results.
+
+## How It Works
+
+This module figures out where your camera sits relative to the arm's tool flange by moving the arm to ~20 positions, photographing a board from each one, and solving for the transform. On success, it **writes the calibrated frame back to your camera's config automatically**.
 
 ## Prerequisites
 
@@ -16,7 +20,7 @@ The goal is fast, good-enough calibration. If a few millimeters of error is fine
 
 We suggest a ChArUco board, like the following:
 
-![Recommended ChArUco board](charuco-board.png)
+![Recommended ChArUco board](assets/charuco-board.png)
 
 ### Step 2: Add the module
 
@@ -33,7 +37,7 @@ In the Viam app, add `viam:camera-calibration` to your machine.
 
 ### Step 3: Configure the pose_tracker
 
-The following values are for the above board.
+The values below are for the board pictured above — they're here to show how the board's properties map into the config. Use the values from your own board.
 
 ```json
 {
@@ -65,7 +69,26 @@ The following values are for the above board.
 }
 ```
 
-Everything else defaults. For best results, add `input_range_override` to tighten the arm's joint limits to your workspace, especially to prevent your cable from being yanked around. **If you have joint limits configured in the motion service, you need to separately apply those here - they will NOT be respected automatically.** 
+Everything else defaults.
+
+**Strongly recommended**: set `input_range_override` to constrain the arm to your workspace. Without limits, the sweep can whip cables around and damage them.
+
+The following is an example of joint limits on an xArm 6:
+
+```json
+"input_range_override": {
+  "arm-1": {
+    "0": {"Min": -1.5708, "Max": 1.5708},
+    "1": {"Min": -1.5708, "Max": 0.5236},
+    "2": {"Min": -2.0944, "Max": 0.5236},
+    "3": {"Min": -1.5708, "Max": 1.5708},
+    "4": {"Min": -1.0472, "Max": 1.5708},
+    "5": {"Min": -3.1416, "Max": 3.1416}
+  }
+}
+```
+
+**Note**: if you have joint limits set on the built-in motion service, this module does NOT read them. Duplicate them here.
 
 ### Step 5: Position the arm
 
@@ -73,15 +96,27 @@ Manually move the arm so the camera has a clean, close view of the whole board. 
 
 ### Step 6: Run calibrate
 
+> **THIS STEP WILL MOVE THE ARM**
+
 From the app's Control tab, on `calibration-handeye`, send:
 
 ```json
 {"calibrate": {}}
 ```
 
-Takes a few minutes. On success, **your camera's `frame` block in the machine config is updated automatically**.
+![Calibrate via DoCommand in the Viam app](assets/calibrate-do-command.png)
+
+Takes a few minutes. 
 
 You can call `Status` on `calibration-handeye` to see progress in real-time.
+
+![Status panel during calibration](assets/calibrate-status.png)
+
+On success, **your camera's `frame` block in the machine config is updated automatically** — verify by checking `"auto_applied": true` in the response.
+
+![Successful calibrate result with auto_applied: true](assets/calibrate-result.png)
+
+If `auto_applied: false`, the calibration ran but the residuals exceeded the auto-apply threshold. The result is still returned; inspect `translation_residual_mm` and `rotation_residual_deg` to decide whether to apply manually or re-run.
 
 ## Reference
 ### `viam:camera-calibration:charuco`
@@ -111,7 +146,7 @@ You can call `Status` on `calibration-handeye` to see progress in real-time.
 | `workspace_bounds`            | No       | auto    | Sample region for calibration poses. Auto-derived from the board position if omitted. |
 | `settle_seconds`              | No       | 2.0     | Delay after each arm move before capturing.                                   |
 | `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Same schema as the built-in motion service. |
-| `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config.                       |
+| `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config. Set to `false` to skip the write and inspect the result manually. |
 | `target_camera`               | No       | derived | Override which camera's `frame` block gets updated.                           |
 | `max_translation_residual_mm` | No       | 5.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
@@ -121,7 +156,7 @@ You can call `Status` on `calibration-handeye` to see progress in real-time.
 
 ### DoCommands
 
-`calibrate` — runs the full pipeline; blocks 2-5 min; returns the transform:
+`calibrate` — runs the full pipeline; takes a few minutes; returns the transform:
 
 ```json
 {
@@ -139,7 +174,7 @@ You can call `Status` on `calibration-handeye` to see progress in real-time.
 {"cancel": {}}
 ```
 
-**Status** (standard RDK, not DoCommand) — poll from a second client during a run:
+`Status` (standard RDK, not DoCommand) — poll from a second client during a run:
 
 ```json
 {
