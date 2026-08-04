@@ -73,6 +73,7 @@ def solve(stations: list, method: str = "tsai") -> dict:
     )
 
     trans_residual_mm, rot_residual_deg = _residuals(stations, R_cam2gripper, t_cam2gripper)
+    pose_diversity_deg = _pose_diversity(stations)
 
     rvec, _ = cv2.Rodrigues(R_cam2gripper)
     return {
@@ -83,8 +84,22 @@ def solve(stations: list, method: str = "tsai") -> dict:
         "residuals": {
             "translation_mm": trans_residual_mm,
             "rotation_deg": rot_residual_deg,
+            "pose_diversity_deg": pose_diversity_deg,
         },
     }
+
+
+def _pose_diversity(stations: list) -> float:
+    rotations = [_hmat(s["T_be"])[:3, :3] for s in stations]
+    angles = []
+    for i in range(len(rotations)):
+        for j in range(i + 1, len(rotations)):
+            R_diff = rotations[i].T @ rotations[j]
+            cos_theta = float(np.clip((np.trace(R_diff) - 1) / 2, -1, 1))
+            angles.append(np.arccos(cos_theta))
+    if not angles:
+        return 0.0
+    return float(np.degrees(np.mean(angles)))
 
 
 def _hmat(pose: dict) -> np.ndarray:

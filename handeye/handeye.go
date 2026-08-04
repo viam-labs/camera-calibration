@@ -310,8 +310,9 @@ type solveResponse struct {
 		Rvec        []float64 `json:"rvec"`
 	} `json:"camera_in_gripper_mm"`
 	Residuals struct {
-		TranslationMM float64 `json:"translation_mm"`
-		RotationDeg   float64 `json:"rotation_deg"`
+		TranslationMM    float64 `json:"translation_mm"`
+		RotationDeg      float64 `json:"rotation_deg"`
+		PoseDiversityDeg float64 `json:"pose_diversity_deg"`
 	} `json:"residuals"`
 }
 
@@ -332,6 +333,7 @@ func (s *solveResponse) toResult() map[string]interface{} {
 		},
 		"translation_residual_mm": s.Residuals.TranslationMM,
 		"rotation_residual_deg":   s.Residuals.RotationDeg,
+		"pose_diversity_deg":      s.Residuals.PoseDiversityDeg,
 	}
 }
 
