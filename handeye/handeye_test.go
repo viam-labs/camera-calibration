@@ -153,6 +153,105 @@ func TestSeedBoardNotDetectedErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "board not detected")
 }
 
+func makeTestArmModel(t *testing.T) *referenceframe.SimpleModel {
+	t.Helper()
+	j0, err := referenceframe.NewRotationalFrame("j0", spatialmath.R4AA{RZ: 1}, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+	test.That(t, err, test.ShouldBeNil)
+	j1, err := referenceframe.NewRotationalFrame("j1", spatialmath.R4AA{RY: 1}, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
+	test.That(t, err, test.ShouldBeNil)
+	model, err := referenceframe.NewSerialModel("arm", []referenceframe.Frame{j0, j1})
+	test.That(t, err, test.ShouldBeNil)
+	return model
+}
+
+func armWithModel(model *referenceframe.SimpleModel, name string) *inject.Arm {
+	a := inject.NewArm(name)
+	a.KinematicsFunc = func(_ context.Context) (referenceframe.Model, error) { return model, nil }
+	return a
+}
+
+func TestCheckStartingJointsSkipsWithNoOverride(t *testing.T) {
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		arm:    armWithModel(makeTestArmModel(t), "arm"),
+		cfg:    &Config{},
+	}
+	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{0.5, 0.5})
+	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestCheckStartingJointsSkipsWhenArmNameMismatch(t *testing.T) {
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		arm:    armWithModel(makeTestArmModel(t), "arm"),
+		cfg: &Config{
+			InputRangeOverride: map[string]map[string]referenceframe.Limit{
+				"other-arm": {"0": {Min: -1, Max: 1}},
+			},
+		},
+	}
+	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{99.0, 99.0})
+	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestCheckStartingJointsAllowsInBounds(t *testing.T) {
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		arm:    armWithModel(makeTestArmModel(t), "arm"),
+		cfg: &Config{
+			InputRangeOverride: map[string]map[string]referenceframe.Limit{
+				"arm": {
+					"0": {Min: -math.Pi / 2, Max: math.Pi / 2},
+					"1": {Min: -math.Pi / 2, Max: math.Pi / 2},
+				},
+			},
+		},
+	}
+	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{0.5, 0.5})
+	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestCheckStartingJointsErrorsWhenOutOfBounds(t *testing.T) {
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		arm:    armWithModel(makeTestArmModel(t), "arm"),
+		cfg: &Config{
+			InputRangeOverride: map[string]map[string]referenceframe.Limit{
+				"arm": {
+					"0": {Min: -1.0472, Max: 1.5708},
+				},
+			},
+		},
+	}
+	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{1.6992, 0.0})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "arm start position violates input_range_override")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "j0")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "1.6992")
+}
+
+func TestCheckStartingJointsSupportsJointNameKeys(t *testing.T) {
+	h := &handeye{
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
+		arm:    armWithModel(makeTestArmModel(t), "arm"),
+		cfg: &Config{
+			InputRangeOverride: map[string]map[string]referenceframe.Limit{
+				"arm": {
+					"j1": {Min: -0.5, Max: 0.5},
+				},
+			},
+		},
+	}
+	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{0.0, 1.0})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "j1")
+}
+
 func TestReturnToStartingPoseSkippedWhenCancelled(t *testing.T) {
 	called := false
 	a := &inject.Arm{}
