@@ -65,7 +65,7 @@ The following values are for the above board.
 }
 ```
 
-Everything else defaults. For best results, add `input_range_override` to tighten the arm's joint limits to your workspace, especially to prevent your cable being yanked around. **If you have joint limits configured in the motion service, you need to separately apply those here - they will NOT be respected automatically.** 
+Everything else defaults. For best results, add `input_range_override` to tighten the arm's joint limits to your workspace, especially to prevent your cable from being yanked around. **If you have joint limits configured in the motion service, you need to separately apply those here - they will NOT be respected automatically.** 
 
 ### Step 5: Position the arm
 
