@@ -106,13 +106,14 @@ type handeye struct {
 	resource.AlwaysRebuild
 	resource.TriviallyCloseable
 
-	name      resource.Name
-	logger    logging.Logger
-	cfg       *Config
-	arm       arm.Arm
-	tracker   posetracker.PoseTracker
-	pythonBin string
-	solvePath string
+	name        resource.Name
+	logger      logging.Logger
+	cfg         *Config
+	arm         arm.Arm
+	tracker     posetracker.PoseTracker
+	pythonBin   string
+	solvePath   string
+	persistPath string
 
 	mu         sync.Mutex
 	cancelFn   context.CancelFunc
@@ -164,16 +165,20 @@ func newHandeye(
 		return nil, fmt.Errorf("handeye: resolve executable path: %w", err)
 	}
 	moduleRoot := filepath.Dir(filepath.Dir(exePath))
-	return &handeye{
-		name:      conf.ResourceName(),
-		logger:    logger,
-		progress:  progressState{state: "ready"},
-		cfg:       cfg,
-		arm:       a,
-		tracker:   tr,
-		pythonBin: filepath.Join(moduleRoot, ".venv", "bin", "python"),
-		solvePath: filepath.Join(moduleRoot, "python", "solve.py"),
-	}, nil
+	name := conf.ResourceName()
+	h := &handeye{
+		name:        name,
+		logger:      logger,
+		progress:    progressState{state: "ready"},
+		cfg:         cfg,
+		arm:         a,
+		tracker:     tr,
+		pythonBin:   filepath.Join(moduleRoot, ".venv", "bin", "python"),
+		solvePath:   filepath.Join(moduleRoot, "python", "solve.py"),
+		persistPath: persistFilePath(name.Name),
+	}
+	h.loadLastResult()
+	return h, nil
 }
 
 func (h *handeye) Name() resource.Name {
@@ -219,6 +224,7 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	h.progress = progressState{state: "capturing", startedAt: time.Now()}
 	h.lastResult = nil
 	h.mu.Unlock()
+	h.deletePersistedResult()
 
 	fail := func(err error) error {
 		h.mu.Lock()
@@ -294,6 +300,7 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	h.progress.state = "complete"
 	h.progress.completedAt = time.Now()
 	h.mu.Unlock()
+	h.saveLastResult()
 	return result, nil
 }
 
