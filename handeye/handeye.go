@@ -55,6 +55,7 @@ type Config struct {
 	MaxTranslationResidualMM float64                                    `json:"max_translation_residual_mm,omitempty"`
 	MaxRotationResidualDeg   float64                                    `json:"max_rotation_residual_deg,omitempty"`
 	MinPoseDiversityDeg      float64                                    `json:"min_pose_diversity_deg,omitempty"`
+	MaxReprojectionErrorPx   float64                                    `json:"max_reprojection_error_px,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -98,6 +99,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.MinPoseDiversityDeg < 0 {
 		return nil, nil, fmt.Errorf("min_pose_diversity_deg must be >= 0 (0 uses the default), got %g", cfg.MinPoseDiversityDeg)
 	}
+	if cfg.MaxReprojectionErrorPx < 0 {
+		return nil, nil, fmt.Errorf("max_reprojection_error_px must be >= 0 (0 uses the default), got %g", cfg.MaxReprojectionErrorPx)
+	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
 
@@ -105,6 +109,7 @@ const (
 	defaultMaxTranslationResidualMM = 5.0
 	defaultMaxRotationResidualDeg   = 2.0
 	defaultMinPoseDiversityDeg      = 30.0
+	defaultMaxReprojectionErrorPx   = 2.0
 )
 
 type handeye struct {
@@ -159,6 +164,9 @@ func newHandeye(
 	}
 	if cfg.MinPoseDiversityDeg == 0 {
 		cfg.MinPoseDiversityDeg = defaultMinPoseDiversityDeg
+	}
+	if cfg.MaxReprojectionErrorPx == 0 {
+		cfg.MaxReprojectionErrorPx = defaultMaxReprojectionErrorPx
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
@@ -318,9 +326,11 @@ type solveResponse struct {
 		Rvec        []float64 `json:"rvec"`
 	} `json:"camera_in_gripper_mm"`
 	Residuals struct {
-		TranslationMM    float64 `json:"translation_mm"`
-		RotationDeg      float64 `json:"rotation_deg"`
-		PoseDiversityDeg float64 `json:"pose_diversity_deg"`
+		TranslationMM             float64 `json:"translation_mm"`
+		RotationDeg               float64 `json:"rotation_deg"`
+		PoseDiversityDeg          float64 `json:"pose_diversity_deg"`
+		MeanStationReprojectionPx float64 `json:"mean_station_reprojection_px"`
+		MaxStationReprojectionPx  float64 `json:"max_station_reprojection_px"`
 	} `json:"residuals"`
 }
 
@@ -339,9 +349,11 @@ func (s *solveResponse) toResult() map[string]interface{} {
 				"th": ovd.Theta,
 			},
 		},
-		"translation_residual_mm": s.Residuals.TranslationMM,
-		"rotation_residual_deg":   s.Residuals.RotationDeg,
-		"pose_diversity_deg":      s.Residuals.PoseDiversityDeg,
+		"translation_residual_mm":      s.Residuals.TranslationMM,
+		"rotation_residual_deg":        s.Residuals.RotationDeg,
+		"pose_diversity_deg":           s.Residuals.PoseDiversityDeg,
+		"mean_station_reprojection_px": s.Residuals.MeanStationReprojectionPx,
+		"max_station_reprojection_px":  s.Residuals.MaxStationReprojectionPx,
 	}
 }
 
@@ -514,9 +526,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, fmt.Errorf("handeye: read arm pose at attempt %d: %w", attempt, err)
 		}
 
+		reprojErr, _ := detectResp["reprojection_error_px"].(float64)
 		stations = append(stations, map[string]interface{}{
-			"T_be": poseToJSON(actualEndPose),
-			"T_cw": poseToJSON(boardInCamera),
+			"T_be":                  poseToJSON(actualEndPose),
+			"T_cw":                  poseToJSON(boardInCamera),
+			"reprojection_error_px": reprojErr,
 		})
 		h.mu.Lock()
 		h.progress.positionsCaptured = len(stations)

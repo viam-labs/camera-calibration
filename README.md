@@ -151,6 +151,7 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
 | `max_translation_residual_mm` | No       | 5.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `min_pose_diversity_deg`      | No       | 30.0    | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
+| `max_reprojection_error_px`   | No       | 2.0     | Skip auto-apply if the mean per-station board-corner reprojection error exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
 
 
 
@@ -165,6 +166,9 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
   "orientation": {"type": "ov_degrees", "value": {"x": 0.002, "y": 0.002, "z": 1.0, "th": 1.16}},
   "translation_residual_mm": 0.94,
   "rotation_residual_deg": 0.34,
+  "pose_diversity_deg": 96.5,
+  "mean_station_reprojection_px": 0.52,
+  "max_station_reprojection_px": 0.80,
   "auto_applied": true
 }
 ```

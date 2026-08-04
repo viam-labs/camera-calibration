@@ -104,6 +104,24 @@ def test_pose_diversity_near_zero_for_identical_rotations():
     assert result["residuals"]["pose_diversity_deg"] < 0.01
 
 
+def test_reprojection_stats_aggregated():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=5)
+    for i, s in enumerate(stations):
+        s["reprojection_error_px"] = 0.1 * (i + 1)
+    result = solve(stations, method="tsai")
+    assert result["residuals"]["mean_station_reprojection_px"] == pytest.approx(0.3)
+    assert result["residuals"]["max_station_reprojection_px"] == pytest.approx(0.5)
+
+
+def test_reprojection_stats_zero_when_absent():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=5)
+    result = solve(stations, method="tsai")
+    assert result["residuals"]["mean_station_reprojection_px"] == 0.0
+    assert result["residuals"]["max_station_reprojection_px"] == 0.0
+
+
 def test_insufficient_stations_raises():
     x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
     stations = _synthetic_stations(x_true, n_stations=2)

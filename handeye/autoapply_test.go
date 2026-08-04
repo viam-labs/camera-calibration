@@ -107,6 +107,40 @@ func TestPassesResidualThresholdsMissingFieldErrors(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "translation_residual_mm")
 }
 
+func TestPassesReprojectionBelowThreshold(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
+	}
+	pass, err := h.passesReprojectionThreshold(map[string]interface{}{
+		"mean_station_reprojection_px": 0.6,
+	})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, pass, test.ShouldBeTrue)
+}
+
+func TestPassesReprojectionAboveThreshold(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
+	}
+	pass, err := h.passesReprojectionThreshold(map[string]interface{}{
+		"mean_station_reprojection_px": 3.4,
+	})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, pass, test.ShouldBeFalse)
+}
+
+func TestPassesReprojectionMissingFieldErrors(t *testing.T) {
+	h := &handeye{
+		logger: logging.NewTestLogger(t),
+		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
+	}
+	_, err := h.passesReprojectionThreshold(map[string]interface{}{})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "mean_station_reprojection_px")
+}
+
 func TestResolveTargetCameraUsesConfigOverride(t *testing.T) {
 	h := &handeye{cfg: &Config{TargetCamera: "override-cam", PoseTracker: "pt"}}
 	got, err := h.resolveTargetCamera(map[string]interface{}{})

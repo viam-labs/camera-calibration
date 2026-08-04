@@ -74,6 +74,7 @@ def solve(stations: list, method: str = "tsai") -> dict:
 
     trans_residual_mm, rot_residual_deg = _residuals(stations, R_cam2gripper, t_cam2gripper)
     pose_diversity_deg = _pose_diversity(stations)
+    mean_reproj_px, max_reproj_px = _reprojection_stats(stations)
 
     rvec, _ = cv2.Rodrigues(R_cam2gripper)
     return {
@@ -85,8 +86,17 @@ def solve(stations: list, method: str = "tsai") -> dict:
             "translation_mm": trans_residual_mm,
             "rotation_deg": rot_residual_deg,
             "pose_diversity_deg": pose_diversity_deg,
+            "mean_station_reprojection_px": mean_reproj_px,
+            "max_station_reprojection_px": max_reproj_px,
         },
     }
+
+
+def _reprojection_stats(stations: list) -> tuple:
+    errors = [float(s["reprojection_error_px"]) for s in stations if "reprojection_error_px" in s]
+    if not errors:
+        return 0.0, 0.0
+    return float(np.mean(errors)), float(np.max(errors))
 
 
 def _pose_diversity(stations: list) -> float:
