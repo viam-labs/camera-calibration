@@ -58,8 +58,8 @@ def detect(
             "corners": [{"id": int, "x": float, "y": float, "position_mm": [x, y, z]}, ...],
             "board_pose_mm": {"translation": [x, y, z], "rvec": [rx, ry, rz]} | None,
         }
-        `corners` is empty and `board_pose_mm` is None if fewer than 4 corners are
-        detected (insufficient for PnP). `rvec` is the compact axis-angle
+        `corners` is empty and `board_pose_mm` is None if fewer than 6 corners are
+        detected (OpenCV solvePnP DLT init requires 6). `rvec` is the compact axis-angle
         representation from cv2.Rodrigues (magnitude = angle, direction = axis);
         Go-side conversion to quaternion via RDK spatialmath.R3ToR4.
 
@@ -86,7 +86,7 @@ def detect(
     charuco_corners, charuco_ids, _marker_corners, marker_ids = detector.detectBoard(image)
 
     marker_count = 0 if marker_ids is None else int(len(marker_ids))
-    if charuco_corners is None or charuco_ids is None or len(charuco_ids) < 4:
+    if charuco_corners is None or charuco_ids is None or len(charuco_ids) < 6:
         return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
 
     camera_matrix = np.array([
@@ -94,15 +94,18 @@ def detect(
         [0.0, intrinsics["fy"], intrinsics["cy"]],
         [0.0, 0.0, 1.0],
     ])
-    dist = np.array(intrinsics.get("distortion") or [0.0, 0.0, 0.0, 0.0, 0.0])
+    dist = np.array(intrinsics.get("distortion") or [0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
     obj_points, img_points = board.matchImagePoints(charuco_corners, charuco_ids)
-    if obj_points is None or len(obj_points) < 4:
+    if obj_points is None or len(obj_points) < 6:
         return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
 
     ok, rvec, tvec = cv2.solvePnP(obj_points, img_points, camera_matrix, dist)
     if not ok:
         return {"num_detected": 0, "marker_count": marker_count, "corners": [], "board_pose_mm": None}
+
+    projected, _ = cv2.projectPoints(obj_points, rvec, tvec, camera_matrix, dist)
+    reprojection_error_px = float(np.mean(np.linalg.norm(img_points.reshape(-1, 2) - projected.reshape(-1, 2), axis=1)))
 
     R, _ = cv2.Rodrigues(rvec)
     t = tvec.flatten()
@@ -129,6 +132,7 @@ def detect(
             "translation": [float(t[0]), float(t[1]), float(t[2])],
             "rvec": [float(r[0]), float(r[1]), float(r[2])],
         },
+        "reprojection_error_px": reprojection_error_px,
     }
 
 

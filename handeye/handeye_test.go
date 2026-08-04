@@ -47,6 +47,7 @@ func TestConfigValidate(t *testing.T) {
 		{name: "workspace_bounds fully omitted validates ok", mutate: func(c *Config) { c.WorkspaceBounds = WorkspaceBounds{} }, wantErr: ""},
 		{name: "settle_seconds unset defaults to 2", mutate: func(c *Config) { c.SettleSeconds = 0 }, wantErr: ""},
 		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be >= 0 (0 uses the default), got -1"},
+		{name: "max_reprojection_error_px negative", mutate: func(c *Config) { c.MaxReprojectionErrorPx = -1 }, wantErr: "max_reprojection_error_px must be >= 0 (0 uses the default), got -1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -527,6 +528,9 @@ func TestSolveResponseToResult(t *testing.T) {
 	resp.CameraInGripperMM.Rvec = []float64{0.0, 0.0, 0.0}
 	resp.Residuals.TranslationMM = 0.5
 	resp.Residuals.RotationDeg = 0.1
+	resp.Residuals.PoseDiversityDeg = 90.0
+	resp.Residuals.MeanStationReprojectionPx = 0.6
+	resp.Residuals.MaxStationReprojectionPx = 0.9
 
 	result := resp.toResult()
 
@@ -548,4 +552,7 @@ func TestSolveResponseToResult(t *testing.T) {
 
 	test.That(t, result["translation_residual_mm"], test.ShouldEqual, 0.5)
 	test.That(t, result["rotation_residual_deg"], test.ShouldEqual, 0.1)
+	test.That(t, result["pose_diversity_deg"], test.ShouldEqual, 90.0)
+	test.That(t, result["mean_station_reprojection_px"], test.ShouldEqual, 0.6)
+	test.That(t, result["max_station_reprojection_px"], test.ShouldEqual, 0.9)
 }

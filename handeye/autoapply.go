@@ -21,6 +21,11 @@ func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) 
 	} else if !pass {
 		return false, nil
 	}
+	if pass, err := h.passesReprojectionThreshold(result); err != nil {
+		return false, err
+	} else if !pass {
+		return false, nil
+	}
 
 	partID := os.Getenv(utils.MachinePartIDEnvVar)
 	if partID == "" {
@@ -87,6 +92,21 @@ func (h *handeye) passesResidualThresholds(result map[string]interface{}) (bool,
 	if transResidual > h.cfg.MaxTranslationResidualMM || rotResidual > h.cfg.MaxRotationResidualDeg {
 		h.logger.Warnf("handeye: residuals (%.2fmm / %.2f°) exceed threshold (%.2fmm / %.2f°); skipping auto-apply",
 			transResidual, rotResidual, h.cfg.MaxTranslationResidualMM, h.cfg.MaxRotationResidualDeg)
+		return false, nil
+	}
+	return true, nil
+}
+
+func (h *handeye) passesReprojectionThreshold(result map[string]interface{}) (bool, error) {
+	meanReproj, ok := result["mean_station_reprojection_px"].(float64)
+	if !ok {
+		return false, errors.New("solve result missing mean_station_reprojection_px")
+	}
+	if meanReproj > h.cfg.MaxReprojectionErrorPx {
+		h.logger.Warnf(
+			"handeye: mean station reprojection error (%.2f px) exceeds threshold (%.2f px); skipping auto-apply — detections look inconsistent, check intrinsics/distortion/focus",
+			meanReproj, h.cfg.MaxReprojectionErrorPx,
+		)
 		return false, nil
 	}
 	return true, nil
