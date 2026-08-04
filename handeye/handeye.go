@@ -233,6 +233,9 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fail(fmt.Errorf("handeye: read starting joints: %w", err))
 	}
+	if cerr := h.checkStartingJointsInBounds(calibCtx, startingJoints); cerr != nil {
+		return nil, fail(cerr)
+	}
 	defer h.returnToStartingPose(ctx, calibCtx, startingJoints)
 
 	seedRes, err := h.seed(calibCtx)
@@ -360,6 +363,41 @@ func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface
 		return nil, fmt.Errorf("handeye: solve output missing translation or rvec")
 	}
 	return resp.toResult(), nil
+}
+
+func (h *handeye) checkStartingJointsInBounds(ctx context.Context, joints []referenceframe.Input) error {
+	overrides, ok := h.cfg.InputRangeOverride[h.arm.Name().Name]
+	if !ok || len(overrides) == 0 {
+		return nil
+	}
+	armModel, err := h.arm.Kinematics(ctx)
+	if err != nil {
+		return fmt.Errorf("handeye: get arm kinematics for pre-flight check: %w", err)
+	}
+	sm, ok := armModel.(*referenceframe.SimpleModel)
+	if !ok {
+		return nil
+	}
+	moveableNames := sm.MoveableFrameNames()
+	for key, limit := range overrides {
+		for i, name := range moveableNames {
+			if key != name && key != strconv.Itoa(i) {
+				continue
+			}
+			if i >= len(joints) {
+				break
+			}
+			val := float64(joints[i])
+			if val < limit.Min || val > limit.Max {
+				return fmt.Errorf(
+					"handeye: arm start position violates input_range_override: joint %q is at %.4f rad but must be within [%.4f, %.4f]. Move the arm to a valid position or widen input_range_override for this joint before running calibrate",
+					name, val, limit.Min, limit.Max,
+				)
+			}
+			break
+		}
+	}
+	return nil
 }
 
 func (h *handeye) returnToStartingPose(ctx, calibCtx context.Context, joints []referenceframe.Input) {
