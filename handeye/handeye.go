@@ -54,6 +54,7 @@ type Config struct {
 	TargetCamera             string                                     `json:"target_camera,omitempty"`
 	MaxTranslationResidualMM float64                                    `json:"max_translation_residual_mm,omitempty"`
 	MaxRotationResidualDeg   float64                                    `json:"max_rotation_residual_deg,omitempty"`
+	MinPoseDiversityDeg      float64                                    `json:"min_pose_diversity_deg,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -94,12 +95,16 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.MaxRotationResidualDeg < 0 {
 		return nil, nil, fmt.Errorf("max_rotation_residual_deg must be >= 0 (0 uses the default), got %g", cfg.MaxRotationResidualDeg)
 	}
+	if cfg.MinPoseDiversityDeg < 0 {
+		return nil, nil, fmt.Errorf("min_pose_diversity_deg must be >= 0 (0 uses the default), got %g", cfg.MinPoseDiversityDeg)
+	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
 
 const (
 	defaultMaxTranslationResidualMM = 5.0
 	defaultMaxRotationResidualDeg   = 2.0
+	defaultMinPoseDiversityDeg      = 30.0
 )
 
 type handeye struct {
@@ -151,6 +156,9 @@ func newHandeye(
 	}
 	if cfg.MaxRotationResidualDeg == 0 {
 		cfg.MaxRotationResidualDeg = defaultMaxRotationResidualDeg
+	}
+	if cfg.MinPoseDiversityDeg == 0 {
+		cfg.MinPoseDiversityDeg = defaultMinPoseDiversityDeg
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
