@@ -31,7 +31,7 @@ In the Viam app, add `viam:camera-calibration` to your machine.
   "type": "registry",
   "name": "viam_camera-calibration",
   "module_id": "viam:camera-calibration",
-  "version": "latest-with-prerelease"
+  "version": "latest"
 }
 ```
 
