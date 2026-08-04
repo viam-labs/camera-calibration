@@ -97,8 +97,9 @@ func TestIntrinsicsJSON(t *testing.T) {
 	c := &charuco{
 		cfg:    &Config{Camera: "cam"},
 		camera: cameraWithIntrinsics(),
+		logger: logging.NewTestLogger(t),
 	}
-	got, err := c.intrinsicsJSON(context.Background())
+	got, err := c.intrinsicsJSON(context.Background(), 1400, 1000)
 	test.That(t, err, test.ShouldBeNil)
 
 	var parsed map[string]interface{}
@@ -110,6 +111,41 @@ func TestIntrinsicsJSON(t *testing.T) {
 	test.That(t, parsed["distortion"], test.ShouldNotBeNil)
 }
 
+func TestIntrinsicsJSONScalesToImageResolution(t *testing.T) {
+	c := &charuco{
+		cfg:    &Config{Camera: "cam"},
+		camera: cameraWithIntrinsics(),
+		logger: logging.NewTestLogger(t),
+	}
+	got, err := c.intrinsicsJSON(context.Background(), 700, 500)
+	test.That(t, err, test.ShouldBeNil)
+
+	var parsed map[string]interface{}
+	test.That(t, json.Unmarshal([]byte(got), &parsed), test.ShouldBeNil)
+	test.That(t, parsed["fx"], test.ShouldEqual, 500.0)
+	test.That(t, parsed["fy"], test.ShouldEqual, 500.0)
+	test.That(t, parsed["cx"], test.ShouldEqual, 350.0)
+	test.That(t, parsed["cy"], test.ShouldEqual, 250.0)
+}
+
+func TestIntrinsicsJSONMissingResolutionErrors(t *testing.T) {
+	cam := &inject.Camera{}
+	cam.PropertiesFunc = func(_ context.Context) (camera.Properties, error) {
+		params := validIntrinsics()
+		params.Width = 0
+		params.Height = 0
+		return camera.Properties{IntrinsicParams: params, DistortionParams: zeroDistortion()}, nil
+	}
+	c := &charuco{
+		cfg:    &Config{Camera: "cam"},
+		camera: cam,
+		logger: logging.NewTestLogger(t),
+	}
+	_, err := c.intrinsicsJSON(context.Background(), 1280, 720)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "intrinsic resolution unknown")
+}
+
 func TestIntrinsicsJSONMissingIntrinsics(t *testing.T) {
 	cam := &inject.Camera{}
 	cam.PropertiesFunc = func(_ context.Context) (camera.Properties, error) {
@@ -118,8 +154,9 @@ func TestIntrinsicsJSONMissingIntrinsics(t *testing.T) {
 	c := &charuco{
 		cfg:    &Config{Camera: "cam"},
 		camera: cam,
+		logger: logging.NewTestLogger(t),
 	}
-	_, err := c.intrinsicsJSON(context.Background())
+	_, err := c.intrinsicsJSON(context.Background(), 1400, 1000)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "missing or zero intrinsics")
 }
@@ -132,10 +169,41 @@ func TestIntrinsicsJSONMissingDistortion(t *testing.T) {
 	c := &charuco{
 		cfg:    &Config{Camera: "cam"},
 		camera: cam,
+		logger: logging.NewTestLogger(t),
 	}
-	_, err := c.intrinsicsJSON(context.Background())
+	_, err := c.intrinsicsJSON(context.Background(), 1400, 1000)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no distortion parameters")
+}
+
+func TestScaleIntrinsicsNoOp(t *testing.T) {
+	fx, fy, cx, cy, err := scaleIntrinsics(1000, 1000, 700, 500, 1400, 1000, 1400, 1000)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, fx, test.ShouldEqual, 1000.0)
+	test.That(t, fy, test.ShouldEqual, 1000.0)
+	test.That(t, cx, test.ShouldEqual, 700.0)
+	test.That(t, cy, test.ShouldEqual, 500.0)
+}
+
+func TestScaleIntrinsicsRescales(t *testing.T) {
+	fx, fy, cx, cy, err := scaleIntrinsics(1500, 1500, 960, 540, 1920, 1080, 1280, 720)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, fx, test.ShouldEqual, 1000.0)
+	test.That(t, fy, test.ShouldEqual, 1000.0)
+	test.That(t, cx, test.ShouldEqual, 640.0)
+	test.That(t, cy, test.ShouldEqual, 360.0)
+}
+
+func TestScaleIntrinsicsUnknownIntrinsicResolutionErrors(t *testing.T) {
+	_, _, _, _, err := scaleIntrinsics(1000, 1000, 700, 500, 0, 0, 1280, 720)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "intrinsic resolution unknown")
+}
+
+func TestScaleIntrinsicsInvalidImageDimsErrors(t *testing.T) {
+	_, _, _, _, err := scaleIntrinsics(1000, 1000, 700, 500, 1400, 1000, 0, 720)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "image dimensions invalid")
 }
 
 func TestDoCommandUnknownVerb(t *testing.T) {

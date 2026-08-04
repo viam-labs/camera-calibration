@@ -4,10 +4,14 @@
 package charuco
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -252,11 +256,6 @@ func (c *charuco) captureAndParse(ctx context.Context) (*detectResponse, error) 
 }
 
 func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
-	intrinsicsJSON, err := c.intrinsicsJSON(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	var filter []string
 	if c.cfg.ImageSource != "" {
 		filter = []string{c.cfg.ImageSource}
@@ -271,6 +270,15 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	imgBytes, err := images[0].Bytes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("charuco: get image bytes: %w", err)
+	}
+	imgCfg, _, err := image.DecodeConfig(bytes.NewReader(imgBytes))
+	if err != nil {
+		return nil, fmt.Errorf("charuco: decode image header for %q: %w", c.cfg.Camera, err)
+	}
+
+	intrinsicsJSON, err := c.intrinsicsJSON(ctx, imgCfg.Width, imgCfg.Height)
+	if err != nil {
+		return nil, err
 	}
 
 	tmpFile, err := os.CreateTemp("", "charuco-*.img")
@@ -298,7 +306,7 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	)
 }
 
-func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
+func (c *charuco) intrinsicsJSON(ctx context.Context, imageW, imageH int) (string, error) {
 	props, err := c.camera.Properties(ctx)
 	if err != nil {
 		return "", fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
@@ -308,6 +316,24 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 		props.IntrinsicParams.Ppx == 0 || props.IntrinsicParams.Ppy == 0 {
 		return "", fmt.Errorf("charuco: camera %q has missing or zero intrinsics — calibrate the camera first", c.cfg.Camera)
 	}
+	fx, fy, cx, cy, err := scaleIntrinsics(
+		props.IntrinsicParams.Fx, props.IntrinsicParams.Fy,
+		props.IntrinsicParams.Ppx, props.IntrinsicParams.Ppy,
+		props.IntrinsicParams.Width, props.IntrinsicParams.Height,
+		imageW, imageH,
+	)
+	if err != nil {
+		return "", fmt.Errorf("charuco: camera %q: %w", c.cfg.Camera, err)
+	}
+	if props.IntrinsicParams.Width != imageW || props.IntrinsicParams.Height != imageH {
+		c.logger.Infof("charuco: camera %q intrinsics reported for %dx%d but image stream is %dx%d; scaled fx/fy/cx/cy by %.3fx/%.3fx",
+			c.cfg.Camera,
+			props.IntrinsicParams.Width, props.IntrinsicParams.Height,
+			imageW, imageH,
+			float64(imageW)/float64(props.IntrinsicParams.Width),
+			float64(imageH)/float64(props.IntrinsicParams.Height))
+	}
+
 	var distortion []float64
 	switch {
 	case c.cfg.Distortion != nil:
@@ -319,10 +345,10 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 	}
 
 	payload := map[string]interface{}{
-		"fx":         props.IntrinsicParams.Fx,
-		"fy":         props.IntrinsicParams.Fy,
-		"cx":         props.IntrinsicParams.Ppx,
-		"cy":         props.IntrinsicParams.Ppy,
+		"fx":         fx,
+		"fy":         fy,
+		"cx":         cx,
+		"cy":         cy,
 		"distortion": distortion,
 	}
 	buf, err := json.Marshal(payload)
@@ -330,6 +356,18 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("charuco: marshal intrinsics: %w", err)
 	}
 	return string(buf), nil
+}
+
+func scaleIntrinsics(fx, fy, cx, cy float64, intrinsicW, intrinsicH, imageW, imageH int) (float64, float64, float64, float64, error) {
+	if intrinsicW <= 0 || intrinsicH <= 0 {
+		return 0, 0, 0, 0, fmt.Errorf("intrinsic resolution unknown (width=%d, height=%d); cannot reconcile with image %dx%d — check camera Properties()", intrinsicW, intrinsicH, imageW, imageH)
+	}
+	if imageW <= 0 || imageH <= 0 {
+		return 0, 0, 0, 0, fmt.Errorf("image dimensions invalid: %dx%d", imageW, imageH)
+	}
+	sx := float64(imageW) / float64(intrinsicW)
+	sy := float64(imageH) / float64(intrinsicH)
+	return fx * sx, fy * sy, cx * sx, cy * sy, nil
 }
 
 func (c *charuco) Status(_ context.Context) (map[string]interface{}, error) {
