@@ -24,6 +24,7 @@ import (
 	"go.viam.com/rdk/motionplan/armplanning"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/robot/framesystem"
 	"go.viam.com/rdk/services/generic"
 	"go.viam.com/rdk/spatialmath"
 
@@ -121,6 +122,7 @@ type handeye struct {
 	cfg         *Config
 	arm         arm.Arm
 	tracker     posetracker.PoseTracker
+	fsService   framesystem.Service
 	pythonBin   string
 	solvePath   string
 	persistPath string
@@ -176,6 +178,10 @@ func newHandeye(
 	if err != nil {
 		return nil, fmt.Errorf("handeye: get pose_tracker dep %q: %w", cfg.PoseTracker, err)
 	}
+	fsService, err := framesystem.FromDependencies(deps)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: get framesystem service: %w", err)
+	}
 	exePath, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("handeye: resolve executable path: %w", err)
@@ -189,6 +195,7 @@ func newHandeye(
 		cfg:         cfg,
 		arm:         a,
 		tracker:     tr,
+		fsService:   fsService,
 		pythonBin:   filepath.Join(moduleRoot, ".venv", "bin", "python"),
 		solvePath:   filepath.Join(moduleRoot, "python", "solve.py"),
 		persistPath: persistFilePath(name.Name),
@@ -467,18 +474,9 @@ func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 }
 
 func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() spatialmath.Pose) ([]map[string]interface{}, error) {
-	armModel, err := h.arm.Kinematics(ctx)
+	fs, err := h.buildFrameSystem(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("handeye: get arm kinematics: %w", err)
-	}
-	fs := referenceframe.NewEmptyFrameSystem("handeye")
-	if err := fs.AddFrame(armModel, fs.World()); err != nil {
-		return nil, fmt.Errorf("handeye: build frame system: %w", err)
-	}
-	if len(h.cfg.InputRangeOverride) > 0 {
-		if err := applyJointLimits(h.logger, fs, h.cfg.InputRangeOverride); err != nil {
-			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
-		}
+		return nil, err
 	}
 
 	stations := make([]map[string]interface{}, 0, targetCount)
@@ -541,6 +539,19 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Unlock()
 	}
 	return stations, nil
+}
+
+func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSystem, error) {
+	fs, err := framesystem.NewFromService(ctx, h.fsService, nil)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: build frame system: %w", err)
+	}
+	if len(h.cfg.InputRangeOverride) > 0 {
+		if err := applyJointLimits(h.logger, fs, h.cfg.InputRangeOverride); err != nil {
+			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
+		}
+	}
+	return fs, nil
 }
 
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
