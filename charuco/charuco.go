@@ -263,7 +263,7 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	}
 	images, _, err := c.camera.Images(ctx, filter, nil)
 	if err != nil {
-		return nil, fmt.Errorf("charuco: capture images: %w", err)
+		return nil, fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
 	}
 	if len(images) == 0 {
 		return nil, errors.New("charuco: camera returned no images")
@@ -301,7 +301,7 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 	props, err := c.camera.Properties(ctx)
 	if err != nil {
-		return "", fmt.Errorf("charuco: get camera properties: %w", err)
+		return "", fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
 	}
 	if props.IntrinsicParams == nil ||
 		props.IntrinsicParams.Fx == 0 || props.IntrinsicParams.Fy == 0 ||
