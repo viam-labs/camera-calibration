@@ -64,29 +64,24 @@ The values below are for the board pictured above — they're here to show how t
   "model": "viam:camera-calibration:handeye",
   "attributes": {
     "arm": "your-arm-name",
-    "pose_tracker": "calibration-charuco"
+    "pose_tracker": "calibration-charuco",
+    "input_range_override": {
+      "your-arm-name": {
+        "0": {"Min": -1.5708, "Max": 1.5708},
+        "1": {"Min": -1.5708, "Max": 0.5236},
+        "2": {"Min": -2.0944, "Max": 0.5236},
+        "3": {"Min": -1.5708, "Max": 1.5708},
+        "4": {"Min": -1.0472, "Max": 1.5708},
+        "5": {"Min": -3.1416, "Max": 3.1416}
+      }
+    }
   }
 }
 ```
 
 Everything else defaults.
 
-**Strongly recommended**: set `input_range_override` to constrain the arm to your workspace. Without limits, the sweep can whip cables around and damage them.
-
-The following is an example of joint limits on an xArm 6:
-
-```json
-"input_range_override": {
-  "arm-1": {
-    "0": {"Min": -1.5708, "Max": 1.5708},
-    "1": {"Min": -1.5708, "Max": 0.5236},
-    "2": {"Min": -2.0944, "Max": 0.5236},
-    "3": {"Min": -1.5708, "Max": 1.5708},
-    "4": {"Min": -1.0472, "Max": 1.5708},
-    "5": {"Min": -3.1416, "Max": 3.1416}
-  }
-}
-```
+**Strongly recommended (but optional)**: tune `input_range_override` to your workspace before running. Without limits appropriate to your rig, the sweep can whip cables around and damage them. The values above are conservative starting points for an xArm 6.
 
 **Note**: if you have joint limits set on the built-in motion service, this module does NOT read them. Duplicate them here.
 
@@ -192,3 +187,12 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
 ```
 
 States: `ready | capturing | solving | applying | complete | failed`.
+
+## Troubleshooting
+
+- **Nonsense reprojection error on Realsense or Orbbec cameras**: set `"image_source": "color"` on the charuco tracker attributes. Without it, the module may grab the depth stream by default, producing garbage detections.
+
+## Not Supported
+
+- **Multi-arm setups**: only single-arm machines are currently supported. On multi-arm rigs, disable the non-target arm's components in your config before calibrating.
+- **Cameras defined via fragments**: auto-apply can't write the calibrated frame back into a fragment-owned camera. Set `auto_apply_result: false` and copy the returned transform into the fragment's camera config manually.
