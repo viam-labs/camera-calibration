@@ -3,7 +3,7 @@ set -euo pipefail
 
 OS="$(uname -s)"
 if [[ "$OS" == "Linux" ]]; then
-    sudo apt-get update
+    sudo apt-get update || true
     sudo apt-get install -y --no-install-recommends \
         ca-certificates \
         libnlopt-dev
