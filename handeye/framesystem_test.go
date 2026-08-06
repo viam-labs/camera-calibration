@@ -51,10 +51,11 @@ func TestBuildFrameSystemAppliesInputRangeOverride(t *testing.T) {
 	h := &handeye{
 		logger: logging.NewTestLogger(t),
 		cfg: &Config{
-			InputRangeOverride: map[string]map[string]referenceframe.Limit{
-				"nonexistent-arm": {"0": {Min: -1, Max: 1}},
+			InputRangeOverride: map[string]referenceframe.Limit{
+				"0": {Min: -1, Max: 1},
 			},
 		},
+		arm:       armWithModel(makeTestArmModel(t), "nonexistent-arm"),
 		fsService: fsSvc,
 	}
 	_, err := h.buildFrameSystem(context.Background())

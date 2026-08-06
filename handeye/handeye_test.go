@@ -182,32 +182,15 @@ func TestCheckStartingJointsSkipsWithNoOverride(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 }
 
-func TestCheckStartingJointsSkipsWhenArmNameMismatch(t *testing.T) {
-	h := &handeye{
-		name:   resource.Name{},
-		logger: logging.NewTestLogger(t),
-		arm:    armWithModel(makeTestArmModel(t), "arm"),
-		cfg: &Config{
-			InputRangeOverride: map[string]map[string]referenceframe.Limit{
-				"other-arm": {"0": {Min: -1, Max: 1}},
-			},
-		},
-	}
-	err := h.checkStartingJointsInBounds(context.Background(), []referenceframe.Input{99.0, 99.0})
-	test.That(t, err, test.ShouldBeNil)
-}
-
 func TestCheckStartingJointsAllowsInBounds(t *testing.T) {
 	h := &handeye{
 		name:   resource.Name{},
 		logger: logging.NewTestLogger(t),
 		arm:    armWithModel(makeTestArmModel(t), "arm"),
 		cfg: &Config{
-			InputRangeOverride: map[string]map[string]referenceframe.Limit{
-				"arm": {
-					"0": {Min: -math.Pi / 2, Max: math.Pi / 2},
-					"1": {Min: -math.Pi / 2, Max: math.Pi / 2},
-				},
+			InputRangeOverride: map[string]referenceframe.Limit{
+				"0": {Min: -math.Pi / 2, Max: math.Pi / 2},
+				"1": {Min: -math.Pi / 2, Max: math.Pi / 2},
 			},
 		},
 	}
@@ -221,10 +204,8 @@ func TestCheckStartingJointsErrorsWhenOutOfBounds(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		arm:    armWithModel(makeTestArmModel(t), "arm"),
 		cfg: &Config{
-			InputRangeOverride: map[string]map[string]referenceframe.Limit{
-				"arm": {
-					"0": {Min: -1.0472, Max: 1.5708},
-				},
+			InputRangeOverride: map[string]referenceframe.Limit{
+				"0": {Min: -1.0472, Max: 1.5708},
 			},
 		},
 	}
@@ -263,10 +244,8 @@ func TestCheckStartingJointsSupportsJointNameKeys(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		arm:    armWithModel(makeTestArmModel(t), "arm"),
 		cfg: &Config{
-			InputRangeOverride: map[string]map[string]referenceframe.Limit{
-				"arm": {
-					"j1": {Min: -0.5, Max: 0.5},
-				},
+			InputRangeOverride: map[string]referenceframe.Limit{
+				"j1": {Min: -0.5, Max: 0.5},
 			},
 		},
 	}
@@ -470,10 +449,8 @@ func makeTestArmFS(t *testing.T) *referenceframe.FrameSystem {
 
 func TestApplyJointLimitsTightensByJointName(t *testing.T) {
 	fs := makeTestArmFS(t)
-	overrides := map[string]map[string]referenceframe.Limit{
-		"arm": {"j0": {Min: -0.5, Max: 0.5}},
-	}
-	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	overrides := map[string]referenceframe.Limit{"j0": {Min: -0.5, Max: 0.5}}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, "arm", overrides)
 	test.That(t, err, test.ShouldBeNil)
 	got := fs.Frame("arm").DoF()
 	test.That(t, got[0], test.ShouldResemble, referenceframe.Limit{Min: -0.5, Max: 0.5})
@@ -482,10 +459,8 @@ func TestApplyJointLimitsTightensByJointName(t *testing.T) {
 
 func TestApplyJointLimitsTightensByIndex(t *testing.T) {
 	fs := makeTestArmFS(t)
-	overrides := map[string]map[string]referenceframe.Limit{
-		"arm": {"1": {Min: -0.1, Max: 0.1}},
-	}
-	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	overrides := map[string]referenceframe.Limit{"1": {Min: -0.1, Max: 0.1}}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, "arm", overrides)
 	test.That(t, err, test.ShouldBeNil)
 	got := fs.Frame("arm").DoF()
 	test.That(t, got[1], test.ShouldResemble, referenceframe.Limit{Min: -0.1, Max: 0.1})
@@ -493,10 +468,8 @@ func TestApplyJointLimitsTightensByIndex(t *testing.T) {
 
 func TestApplyJointLimitsClampsLoosening(t *testing.T) {
 	fs := makeTestArmFS(t)
-	overrides := map[string]map[string]referenceframe.Limit{
-		"arm": {"j0": {Min: -10, Max: 10}},
-	}
-	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	overrides := map[string]referenceframe.Limit{"j0": {Min: -10, Max: 10}}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, "arm", overrides)
 	test.That(t, err, test.ShouldBeNil)
 	got := fs.Frame("arm").DoF()
 	test.That(t, got[0], test.ShouldResemble, referenceframe.Limit{Min: -math.Pi, Max: math.Pi})
@@ -504,22 +477,18 @@ func TestApplyJointLimitsClampsLoosening(t *testing.T) {
 
 func TestApplyJointLimitsUnknownFrameErrors(t *testing.T) {
 	fs := makeTestArmFS(t)
-	overrides := map[string]map[string]referenceframe.Limit{
-		"bogus": {"j0": {Min: -0.5, Max: 0.5}},
-	}
-	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	overrides := map[string]referenceframe.Limit{"j0": {Min: -0.5, Max: 0.5}}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, "bogus", overrides)
 	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "doesn't exist")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "not found")
 }
 
 func TestApplyJointLimitsUnknownJointErrors(t *testing.T) {
 	fs := makeTestArmFS(t)
-	overrides := map[string]map[string]referenceframe.Limit{
-		"arm": {"bogus": {Min: -0.5, Max: 0.5}},
-	}
-	err := applyJointLimits(logging.NewTestLogger(t), fs, overrides)
+	overrides := map[string]referenceframe.Limit{"bogus": {Min: -0.5, Max: 0.5}}
+	err := applyJointLimits(logging.NewTestLogger(t), fs, "arm", overrides)
 	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "can't find mod")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "can't find joint")
 }
 
 func TestSolveResponseToResult(t *testing.T) {

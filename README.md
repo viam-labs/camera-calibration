@@ -66,14 +66,12 @@ The values below are for the board pictured above — they're here to show how t
     "arm": "your-arm-name",
     "pose_tracker": "calibration-charuco",
     "input_range_override": {
-      "your-arm-name": {
-        "0": {"Min": -1.5708, "Max": 1.5708},
-        "1": {"Min": -1.5708, "Max": 0.5236},
-        "2": {"Min": -2.0944, "Max": 0.5236},
-        "3": {"Min": -1.5708, "Max": 1.5708},
-        "4": {"Min": -1.0472, "Max": 1.5708},
-        "5": {"Min": -3.1416, "Max": 3.1416}
-      }
+      "0": {"Min": -1.5708, "Max": 1.5708},
+      "1": {"Min": -1.5708, "Max": 0.5236},
+      "2": {"Min": -2.0944, "Max": 0.5236},
+      "3": {"Min": -1.5708, "Max": 1.5708},
+      "4": {"Min": -1.0472, "Max": 1.5708},
+      "5": {"Min": -3.1416, "Max": 3.1416}
     }
   }
 }
@@ -140,7 +138,7 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
 | `num_poses`                   | No       | 20      | Successful captures required before solving.                                  |
 | `workspace_bounds`            | No       | auto    | Sample region for calibration poses. Auto-derived from the board position if omitted. |
 | `settle_seconds`              | No       | 2.0     | Delay after each arm move before capturing.                                   |
-| `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Same schema as the built-in motion service. |
+| `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Keys are joint indices (`"0"`, `"1"`, ...) or joint names; values are `{"Min": ..., "Max": ...}`. Applied to the arm named in `arm`. |
 | `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config. Set to `false` to skip the write and inspect the result manually. |
 | `target_camera`               | No       | derived | Override which camera's `frame` block gets updated.                           |
 | `max_translation_residual_mm` | No       | 5.0     | Skip auto-apply if solve residual exceeds this.                               |
