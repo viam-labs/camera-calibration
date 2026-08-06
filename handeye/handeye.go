@@ -57,6 +57,7 @@ type Config struct {
 	MaxRotationResidualDeg   float64                         `json:"max_rotation_residual_deg,omitempty"`
 	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
+	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -103,6 +104,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.MaxReprojectionErrorPx < 0 {
 		return nil, nil, fmt.Errorf("max_reprojection_error_px must be >= 0 (0 uses the default), got %g", cfg.MaxReprojectionErrorPx)
 	}
+	if cfg.MaxConsecutiveFailures < 0 {
+		return nil, nil, fmt.Errorf("max_consecutive_failures must be >= 0 (0 uses the default), got %d", cfg.MaxConsecutiveFailures)
+	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
 
@@ -111,6 +115,7 @@ const (
 	defaultMaxRotationResidualDeg   = 2.0
 	defaultMinPoseDiversityDeg      = 30.0
 	defaultMaxReprojectionErrorPx   = 2.0
+	defaultMaxConsecutiveFailures   = 200
 )
 
 type handeye struct {
@@ -169,6 +174,9 @@ func newHandeye(
 	}
 	if cfg.MaxReprojectionErrorPx == 0 {
 		cfg.MaxReprojectionErrorPx = defaultMaxReprojectionErrorPx
+	}
+	if cfg.MaxConsecutiveFailures == 0 {
+		cfg.MaxConsecutiveFailures = defaultMaxConsecutiveFailures
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
@@ -484,6 +492,18 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	stations := make([]map[string]interface{}, 0, targetCount)
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
 	attempt := 0
+	consecutiveFailures := 0
+
+	recordFailure := func(reason string) error {
+		consecutiveFailures++
+		if consecutiveFailures >= h.cfg.MaxConsecutiveFailures {
+			return fmt.Errorf(
+				"handeye: sweep gave up after %d consecutive failed attempts (%d total attempts, %d stations captured). Last failure: %s. Check workspace_bounds, input_range_override, and obstacle configuration",
+				consecutiveFailures, attempt, len(stations), reason,
+			)
+		}
+		return nil
+	}
 
 	for len(stations) < targetCount {
 		if err := ctx.Err(); err != nil {
@@ -505,6 +525,9 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, fmt.Errorf("handeye: attempt %d execute failed, halting sweep: %w", attempt, execErr)
 		}
 		if planErr != nil {
+			if capErr := recordFailure(planErr.Error()); capErr != nil {
+				return nil, capErr
+			}
 			h.logger.Infof("handeye: attempt %d unreachable, skipping: %v", attempt, planErr)
 			continue
 		}
@@ -521,6 +544,9 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		}
 		boardInCamera, err := parseBoardPose(detectResp)
 		if err != nil {
+			if capErr := recordFailure("board not detected"); capErr != nil {
+				return nil, capErr
+			}
 			h.logger.Infof("handeye: attempt %d board not detected, skipping", attempt)
 			continue
 		}
@@ -536,6 +562,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			"T_cw":                  poseToJSON(boardInCamera),
 			"reprojection_error_px": reprojErr,
 		})
+		consecutiveFailures = 0
 		h.mu.Lock()
 		h.progress.positionsCaptured = len(stations)
 		h.mu.Unlock()
