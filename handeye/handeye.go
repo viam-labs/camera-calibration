@@ -45,18 +45,18 @@ func init() {
 
 // Config is the handeye service configuration.
 type Config struct {
-	Arm                      string                                     `json:"arm"`
-	PoseTracker              string                                     `json:"pose_tracker"`
-	NumPoses                 int                                        `json:"num_poses"`
-	WorkspaceBounds          WorkspaceBounds                            `json:"workspace_bounds"`
-	SettleSeconds            float64                                    `json:"settle_seconds"`
-	InputRangeOverride       map[string]map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
-	AutoApplyResult          *bool                                      `json:"auto_apply_result,omitempty"`
-	TargetCamera             string                                     `json:"target_camera,omitempty"`
-	MaxTranslationResidualMM float64                                    `json:"max_translation_residual_mm,omitempty"`
-	MaxRotationResidualDeg   float64                                    `json:"max_rotation_residual_deg,omitempty"`
-	MinPoseDiversityDeg      float64                                    `json:"min_pose_diversity_deg,omitempty"`
-	MaxReprojectionErrorPx   float64                                    `json:"max_reprojection_error_px,omitempty"`
+	Arm                      string                          `json:"arm"`
+	PoseTracker              string                          `json:"pose_tracker"`
+	NumPoses                 int                             `json:"num_poses"`
+	WorkspaceBounds          WorkspaceBounds                 `json:"workspace_bounds"`
+	SettleSeconds            float64                         `json:"settle_seconds"`
+	InputRangeOverride       map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
+	AutoApplyResult          *bool                           `json:"auto_apply_result,omitempty"`
+	TargetCamera             string                          `json:"target_camera,omitempty"`
+	MaxTranslationResidualMM float64                         `json:"max_translation_residual_mm,omitempty"`
+	MaxRotationResidualDeg   float64                         `json:"max_rotation_residual_deg,omitempty"`
+	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
+	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -408,10 +408,10 @@ func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface
 }
 
 func (h *handeye) checkStartingJointsInBounds(ctx context.Context, joints []referenceframe.Input) error {
-	overrides, ok := h.cfg.InputRangeOverride[h.arm.Name().Name]
-	if !ok || len(overrides) == 0 {
+	if len(h.cfg.InputRangeOverride) == 0 {
 		return nil
 	}
+	overrides := h.cfg.InputRangeOverride
 	armModel, err := h.arm.Kinematics(ctx)
 	if err != nil {
 		return fmt.Errorf("handeye: get arm kinematics for pre-flight check: %w", err)
@@ -549,7 +549,7 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 		return nil, fmt.Errorf("handeye: build frame system: %w", err)
 	}
 	if len(h.cfg.InputRangeOverride) > 0 {
-		if err := applyJointLimits(h.logger, fs, h.cfg.InputRangeOverride); err != nil {
+		if err := applyJointLimits(h.logger, fs, h.arm.Name().Name, h.cfg.InputRangeOverride); err != nil {
 			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
 		}
 	}
@@ -745,55 +745,50 @@ func poseToJSON(p spatialmath.Pose) map[string]interface{} {
 	}
 }
 
-func applyJointLimits(logger logging.Logger, fs *referenceframe.FrameSystem, inputRangeOverride map[string]map[string]referenceframe.Limit) error {
-	for fName, mods := range inputRangeOverride {
-		f := fs.Frame(fName)
-		if f == nil {
-			return fmt.Errorf("frame (%s) in input_range_override doesn't exist", fName)
-		}
-		sm, ok := f.(*referenceframe.SimpleModel)
-		if !ok {
-			return fmt.Errorf("can only override joints for SimpleModel for now, not %T", f)
-		}
+func applyJointLimits(logger logging.Logger, fs *referenceframe.FrameSystem, armName string, mods map[string]referenceframe.Limit) error {
+	f := fs.Frame(armName)
+	if f == nil {
+		return fmt.Errorf("arm frame %q not found; input_range_override cannot be applied", armName)
+	}
+	sm, ok := f.(*referenceframe.SimpleModel)
+	if !ok {
+		return fmt.Errorf("can only override joints for SimpleModel for now, not %T", f)
+	}
 
-		resolved := make(map[string]referenceframe.Limit, len(mods))
-		moveableNames := sm.MoveableFrameNames()
-		existingLimits := sm.DoF()
-		for key, limit := range mods {
-			matched := false
-			for i, name := range moveableNames {
-				if key == name || key == strconv.Itoa(i) {
-					existing := existingLimits[i]
-					tightened := referenceframe.Limit{
-						Min: math.Max(limit.Min, existing.Min),
-						Max: math.Min(limit.Max, existing.Max),
-					}
-					if tightened.Min != limit.Min || tightened.Max != limit.Max {
-						logger.Warnf(
-							"input_range_override for frame %q joint %q would loosen limits: requested [%.6f, %.6f], model declares [%.6f, %.6f]; tightening to [%.6f, %.6f]",
-							fName, name,
-							limit.Min, limit.Max,
-							existing.Min, existing.Max,
-							tightened.Min, tightened.Max,
-						)
-					}
-					resolved[name] = tightened
-					matched = true
-					break
+	resolved := make(map[string]referenceframe.Limit, len(mods))
+	moveableNames := sm.MoveableFrameNames()
+	existingLimits := sm.DoF()
+	for key, limit := range mods {
+		matched := false
+		for i, name := range moveableNames {
+			if key == name || key == strconv.Itoa(i) {
+				existing := existingLimits[i]
+				tightened := referenceframe.Limit{
+					Min: math.Max(limit.Min, existing.Min),
+					Max: math.Min(limit.Max, existing.Max),
 				}
-			}
-			if !matched {
-				return fmt.Errorf("can't find mod (%s)", key)
+				if tightened.Min != limit.Min || tightened.Max != limit.Max {
+					logger.Warnf(
+						"input_range_override for arm %q joint %q would loosen limits: requested [%.6f, %.6f], model declares [%.6f, %.6f]; tightening to [%.6f, %.6f]",
+						armName, name,
+						limit.Min, limit.Max,
+						existing.Min, existing.Max,
+						tightened.Min, tightened.Max,
+					)
+				}
+				resolved[name] = tightened
+				matched = true
+				break
 			}
 		}
-
-		newModel, err := referenceframe.NewModelWithLimitOverrides(sm, resolved)
-		if err != nil {
-			return err
-		}
-		if err := fs.ReplaceFrame(newModel); err != nil {
-			return err
+		if !matched {
+			return fmt.Errorf("can't find joint %q in arm %q", key, armName)
 		}
 	}
-	return nil
+
+	newModel, err := referenceframe.NewModelWithLimitOverrides(sm, resolved)
+	if err != nil {
+		return err
+	}
+	return fs.ReplaceFrame(newModel)
 }
