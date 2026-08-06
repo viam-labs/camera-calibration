@@ -258,8 +258,10 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		return err
 	}
 
-	if err := h.verifyCameraFrameParent(calibCtx); err != nil {
-		return nil, fail(fmt.Errorf("handeye: %w", err))
+	if h.cfg.autoApplyEnabled() {
+		if err := h.verifyCameraFrameParent(calibCtx); err != nil {
+			return nil, fail(fmt.Errorf("handeye: %w", err))
+		}
 	}
 
 	startingJoints, err := h.arm.JointPositions(calibCtx, nil)
