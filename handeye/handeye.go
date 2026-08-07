@@ -590,14 +590,12 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
 	armName := h.arm.Name().Name
-	currentInputs, err := h.arm.JointPositions(ctx, nil)
+	fsInputs, err := h.fsService.CurrentInputs(ctx)
 	if err != nil {
-		return fmt.Errorf("get current joints: %w", err), nil
+		return fmt.Errorf("get frame system inputs: %w", err), nil
 	}
 
-	startState := armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{
-		armName: currentInputs,
-	})
+	startState := armplanning.NewPlanState(nil, fsInputs)
 	goalState := armplanning.NewPlanState(referenceframe.FrameSystemPoses{
 		armName: referenceframe.NewPoseInFrame(referenceframe.World, target),
 	}, nil)
