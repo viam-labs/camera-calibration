@@ -109,7 +109,7 @@ On success, **your camera's `frame` block in the machine config is updated autom
 
 ![Successful calibrate result with auto_applied: true](assets/calibrate-result.png)
 
-If `auto_applied: false`, the calibration ran but the residuals exceeded the auto-apply threshold. The result is still returned; inspect `translation_residual_mm` and `rotation_residual_deg` to decide whether to apply manually or re-run.
+If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The result is still returned; inspect the `quality` block to decide whether to apply the returned `frame` manually or re-run.
 
 ## Reference
 ### `viam:camera-calibration:charuco`
@@ -152,20 +152,27 @@ If `auto_applied: false`, the calibration ran but the residuals exceeded the aut
 
 ### DoCommands
 
-`calibrate` — runs the full pipeline; takes a few minutes; returns the transform:
+`calibrate` — runs the full pipeline; takes a few minutes; returns:
 
 ```json
 {
-  "translation": {"x": -37.6, "y": -75.2, "z": 109.5},
-  "orientation": {"type": "ov_degrees", "value": {"x": 0.002, "y": 0.002, "z": 1.0, "th": 1.16}},
-  "translation_residual_mm": 0.94,
-  "rotation_residual_deg": 0.34,
-  "pose_diversity_deg": 96.5,
-  "mean_station_reprojection_px": 0.52,
-  "max_station_reprojection_px": 0.80,
+  "frame": {
+    "parent": "your-arm-name",
+    "translation": {"x": -37.6, "y": -75.2, "z": 109.5},
+    "orientation": {"type": "ov_degrees", "value": {"x": 0.002, "y": 0.002, "z": 1.0, "th": 1.16}}
+  },
+  "quality": {
+    "translation_residual_mm": 0.94,
+    "rotation_residual_deg": 0.34,
+    "pose_diversity_deg": 96.5,
+    "mean_station_reprojection_px": 0.52,
+    "max_station_reprojection_px": 0.80
+  },
   "auto_applied": true
 }
 ```
+
+The `frame` block matches the schema of a camera's `frame` config, so if `auto_applied: false` you can copy it straight into the camera's config.
 
 `cancel` — halts a running calibrate.
 

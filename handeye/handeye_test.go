@@ -402,15 +402,21 @@ func TestStatusIncludesResultWhenComplete(t *testing.T) {
 			completedAt:        completedAt,
 		},
 		lastResult: map[string]interface{}{
-			"translation":             map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0},
-			"translation_residual_mm": 0.5,
+			"frame": map[string]interface{}{
+				"parent":      "arm",
+				"translation": map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0},
+			},
+			"quality": map[string]interface{}{"translation_residual_mm": 0.5},
 		},
 	}
 	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "complete")
 	test.That(t, resp["elapsed_time"], test.ShouldEqual, "3m 0s")
-	test.That(t, resp["translation"], test.ShouldResemble, map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0})
-	test.That(t, resp["translation_residual_mm"], test.ShouldEqual, 0.5)
+	test.That(t, resp["frame"], test.ShouldResemble, map[string]interface{}{
+		"parent":      "arm",
+		"translation": map[string]interface{}{"x": 1.0, "y": 2.0, "z": 3.0},
+	})
+	test.That(t, resp["quality"], test.ShouldResemble, map[string]interface{}{"translation_residual_mm": 0.5})
 }
 
 func TestFormatElapsed(t *testing.T) {
@@ -502,15 +508,19 @@ func TestSolveResponseToResult(t *testing.T) {
 	resp.Residuals.MeanStationReprojectionPx = 0.6
 	resp.Residuals.MaxStationReprojectionPx = 0.9
 
-	result := resp.toResult()
+	result := resp.toResult("my-arm")
 
-	trans, ok := result["translation"].(map[string]interface{})
+	frame, ok := result["frame"].(map[string]interface{})
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, frame["parent"], test.ShouldEqual, "my-arm")
+
+	trans, ok := frame["translation"].(map[string]interface{})
 	test.That(t, ok, test.ShouldBeTrue)
 	test.That(t, trans["x"], test.ShouldEqual, 10.0)
 	test.That(t, trans["y"], test.ShouldEqual, 20.0)
 	test.That(t, trans["z"], test.ShouldEqual, 30.0)
 
-	orient, ok := result["orientation"].(map[string]interface{})
+	orient, ok := frame["orientation"].(map[string]interface{})
 	test.That(t, ok, test.ShouldBeTrue)
 	test.That(t, orient["type"], test.ShouldEqual, "ov_degrees")
 	ovValue, ok := orient["value"].(map[string]interface{})
@@ -520,9 +530,11 @@ func TestSolveResponseToResult(t *testing.T) {
 	test.That(t, ovValue, test.ShouldContainKey, "z")
 	test.That(t, ovValue, test.ShouldContainKey, "th")
 
-	test.That(t, result["translation_residual_mm"], test.ShouldEqual, 0.5)
-	test.That(t, result["rotation_residual_deg"], test.ShouldEqual, 0.1)
-	test.That(t, result["pose_diversity_deg"], test.ShouldEqual, 90.0)
-	test.That(t, result["mean_station_reprojection_px"], test.ShouldEqual, 0.6)
-	test.That(t, result["max_station_reprojection_px"], test.ShouldEqual, 0.9)
+	quality, ok := result["quality"].(map[string]interface{})
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, quality["translation_residual_mm"], test.ShouldEqual, 0.5)
+	test.That(t, quality["rotation_residual_deg"], test.ShouldEqual, 0.1)
+	test.That(t, quality["pose_diversity_deg"], test.ShouldEqual, 90.0)
+	test.That(t, quality["mean_station_reprojection_px"], test.ShouldEqual, 0.6)
+	test.That(t, quality["max_station_reprojection_px"], test.ShouldEqual, 0.9)
 }

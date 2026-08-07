@@ -11,17 +11,21 @@ import (
 )
 
 func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) (bool, error) {
-	if pass, err := h.passesPoseDiversityThreshold(result); err != nil {
+	quality, qerr := qualityFromResult(result)
+	if qerr != nil {
+		return false, qerr
+	}
+	if pass, err := h.passesPoseDiversityThreshold(quality); err != nil {
 		return false, err
 	} else if !pass {
 		return false, nil
 	}
-	if pass, err := h.passesResidualThresholds(result); err != nil {
+	if pass, err := h.passesResidualThresholds(quality); err != nil {
 		return false, err
 	} else if !pass {
 		return false, nil
 	}
-	if pass, err := h.passesReprojectionThreshold(result); err != nil {
+	if pass, err := h.passesReprojectionThreshold(quality); err != nil {
 		return false, err
 	} else if !pass {
 		return false, nil
@@ -65,10 +69,10 @@ func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) 
 	return true, nil
 }
 
-func (h *handeye) passesPoseDiversityThreshold(result map[string]interface{}) (bool, error) {
-	diversity, ok := result["pose_diversity_deg"].(float64)
+func (h *handeye) passesPoseDiversityThreshold(quality map[string]interface{}) (bool, error) {
+	diversity, ok := quality["pose_diversity_deg"].(float64)
 	if !ok {
-		return false, errors.New("solve result missing pose_diversity_deg")
+		return false, errors.New("solve result missing quality.pose_diversity_deg")
 	}
 	if diversity < h.cfg.MinPoseDiversityDeg {
 		h.logger.Warnf(
@@ -80,14 +84,14 @@ func (h *handeye) passesPoseDiversityThreshold(result map[string]interface{}) (b
 	return true, nil
 }
 
-func (h *handeye) passesResidualThresholds(result map[string]interface{}) (bool, error) {
-	transResidual, ok := result["translation_residual_mm"].(float64)
+func (h *handeye) passesResidualThresholds(quality map[string]interface{}) (bool, error) {
+	transResidual, ok := quality["translation_residual_mm"].(float64)
 	if !ok {
-		return false, errors.New("solve result missing translation_residual_mm")
+		return false, errors.New("solve result missing quality.translation_residual_mm")
 	}
-	rotResidual, ok := result["rotation_residual_deg"].(float64)
+	rotResidual, ok := quality["rotation_residual_deg"].(float64)
 	if !ok {
-		return false, errors.New("solve result missing rotation_residual_deg")
+		return false, errors.New("solve result missing quality.rotation_residual_deg")
 	}
 	if transResidual > h.cfg.MaxTranslationResidualMM || rotResidual > h.cfg.MaxRotationResidualDeg {
 		h.logger.Warnf("handeye: residuals (%.2fmm / %.2f°) exceed threshold (%.2fmm / %.2f°); skipping auto-apply",
@@ -97,10 +101,10 @@ func (h *handeye) passesResidualThresholds(result map[string]interface{}) (bool,
 	return true, nil
 }
 
-func (h *handeye) passesReprojectionThreshold(result map[string]interface{}) (bool, error) {
-	meanReproj, ok := result["mean_station_reprojection_px"].(float64)
+func (h *handeye) passesReprojectionThreshold(quality map[string]interface{}) (bool, error) {
+	meanReproj, ok := quality["mean_station_reprojection_px"].(float64)
 	if !ok {
-		return false, errors.New("solve result missing mean_station_reprojection_px")
+		return false, errors.New("solve result missing quality.mean_station_reprojection_px")
 	}
 	if meanReproj > h.cfg.MaxReprojectionErrorPx {
 		h.logger.Warnf(
@@ -120,15 +124,27 @@ func (h *handeye) resolveTargetCamera(robotConfig map[string]interface{}) (strin
 }
 
 func frameFromResult(result map[string]interface{}) (translation, orientation map[string]interface{}, err error) {
-	translation, ok := result["translation"].(map[string]interface{})
+	frame, ok := result["frame"].(map[string]interface{})
 	if !ok {
-		return nil, nil, errors.New("solve result missing translation")
+		return nil, nil, errors.New("solve result missing frame")
 	}
-	orientation, ok = result["orientation"].(map[string]interface{})
+	translation, ok = frame["translation"].(map[string]interface{})
 	if !ok {
-		return nil, nil, errors.New("solve result missing orientation")
+		return nil, nil, errors.New("solve result missing frame.translation")
+	}
+	orientation, ok = frame["orientation"].(map[string]interface{})
+	if !ok {
+		return nil, nil, errors.New("solve result missing frame.orientation")
 	}
 	return translation, orientation, nil
+}
+
+func qualityFromResult(result map[string]interface{}) (map[string]interface{}, error) {
+	quality, ok := result["quality"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("solve result missing quality")
+	}
+	return quality, nil
 }
 
 func deriveTargetCameraFromPoseTracker(robotConfig map[string]interface{}, poseTrackerName string) (string, error) {

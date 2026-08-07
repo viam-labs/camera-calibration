@@ -68,9 +68,7 @@ func TestPassesPoseDiversityAboveThreshold(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{MinPoseDiversityDeg: 30.0},
 	}
-	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{
-		"pose_diversity_deg": 96.0,
-	})
+	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{"pose_diversity_deg": 96.0})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, pass, test.ShouldBeTrue)
 }
@@ -80,9 +78,7 @@ func TestPassesPoseDiversityBelowThreshold(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{MinPoseDiversityDeg: 30.0},
 	}
-	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{
-		"pose_diversity_deg": 12.5,
-	})
+	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{"pose_diversity_deg": 12.5})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, pass, test.ShouldBeFalse)
 }
@@ -112,9 +108,7 @@ func TestPassesReprojectionBelowThreshold(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
 	}
-	pass, err := h.passesReprojectionThreshold(map[string]interface{}{
-		"mean_station_reprojection_px": 0.6,
-	})
+	pass, err := h.passesReprojectionThreshold(map[string]interface{}{"mean_station_reprojection_px": 0.6})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, pass, test.ShouldBeTrue)
 }
@@ -124,9 +118,7 @@ func TestPassesReprojectionAboveThreshold(t *testing.T) {
 		logger: logging.NewTestLogger(t),
 		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
 	}
-	pass, err := h.passesReprojectionThreshold(map[string]interface{}{
-		"mean_station_reprojection_px": 3.4,
-	})
+	pass, err := h.passesReprojectionThreshold(map[string]interface{}{"mean_station_reprojection_px": 3.4})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, pass, test.ShouldBeFalse)
 }
@@ -165,8 +157,10 @@ func TestResolveTargetCameraDerivesFromPoseTracker(t *testing.T) {
 
 func TestFrameFromResult(t *testing.T) {
 	trans, orient, err := frameFromResult(map[string]interface{}{
-		"translation": map[string]interface{}{"x": 1.0},
-		"orientation": map[string]interface{}{"type": "ov_degrees"},
+		"frame": map[string]interface{}{
+			"translation": map[string]interface{}{"x": 1.0},
+			"orientation": map[string]interface{}{"type": "ov_degrees"},
+		},
 	})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, trans, test.ShouldNotBeNil)
@@ -175,7 +169,9 @@ func TestFrameFromResult(t *testing.T) {
 
 func TestFrameFromResultMissingTranslation(t *testing.T) {
 	_, _, err := frameFromResult(map[string]interface{}{
-		"orientation": map[string]interface{}{"type": "ov_degrees"},
+		"frame": map[string]interface{}{
+			"orientation": map[string]interface{}{"type": "ov_degrees"},
+		},
 	})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "translation")
@@ -183,7 +179,9 @@ func TestFrameFromResultMissingTranslation(t *testing.T) {
 
 func TestFrameFromResultMissingOrientation(t *testing.T) {
 	_, _, err := frameFromResult(map[string]interface{}{
-		"translation": map[string]interface{}{"x": 1.0},
+		"frame": map[string]interface{}{
+			"translation": map[string]interface{}{"x": 1.0},
+		},
 	})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "orientation")

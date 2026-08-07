@@ -355,26 +355,31 @@ type solveResponse struct {
 	} `json:"residuals"`
 }
 
-func (s *solveResponse) toResult() map[string]interface{} {
+func (s *solveResponse) toResult(armName string) map[string]interface{} {
 	t := s.CameraInGripperMM.Translation
 	rvec := r3.Vector{X: s.CameraInGripperMM.Rvec[0], Y: s.CameraInGripperMM.Rvec[1], Z: s.CameraInGripperMM.Rvec[2]}
 	ovd := spatialmath.R3ToR4(rvec).OrientationVectorDegrees()
 	return map[string]interface{}{
-		"translation": map[string]interface{}{"x": t[0], "y": t[1], "z": t[2]},
-		"orientation": map[string]interface{}{
-			"type": "ov_degrees",
-			"value": map[string]interface{}{
-				"x":  ovd.OX,
-				"y":  ovd.OY,
-				"z":  ovd.OZ,
-				"th": ovd.Theta,
+		"frame": map[string]interface{}{
+			"parent":      armName,
+			"translation": map[string]interface{}{"x": t[0], "y": t[1], "z": t[2]},
+			"orientation": map[string]interface{}{
+				"type": "ov_degrees",
+				"value": map[string]interface{}{
+					"x":  ovd.OX,
+					"y":  ovd.OY,
+					"z":  ovd.OZ,
+					"th": ovd.Theta,
+				},
 			},
 		},
-		"translation_residual_mm":      s.Residuals.TranslationMM,
-		"rotation_residual_deg":        s.Residuals.RotationDeg,
-		"pose_diversity_deg":           s.Residuals.PoseDiversityDeg,
-		"mean_station_reprojection_px": s.Residuals.MeanStationReprojectionPx,
-		"max_station_reprojection_px":  s.Residuals.MaxStationReprojectionPx,
+		"quality": map[string]interface{}{
+			"translation_residual_mm":      s.Residuals.TranslationMM,
+			"rotation_residual_deg":        s.Residuals.RotationDeg,
+			"pose_diversity_deg":           s.Residuals.PoseDiversityDeg,
+			"mean_station_reprojection_px": s.Residuals.MeanStationReprojectionPx,
+			"max_station_reprojection_px":  s.Residuals.MaxStationReprojectionPx,
+		},
 	}
 }
 
@@ -412,7 +417,7 @@ func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface
 	if len(resp.CameraInGripperMM.Translation) != 3 || len(resp.CameraInGripperMM.Rvec) != 3 {
 		return nil, fmt.Errorf("handeye: solve output missing translation or rvec")
 	}
-	return resp.toResult(), nil
+	return resp.toResult(h.cfg.Arm), nil
 }
 
 func (h *handeye) checkStartingJointsInBounds(ctx context.Context, joints []referenceframe.Input) error {
