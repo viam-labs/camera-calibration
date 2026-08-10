@@ -18,7 +18,9 @@ This module figures out where your camera sits relative to the arm's tool flange
 
 ### Step 1: Get a calibration board
 
-We suggest a ChArUco board, like the following:
+We suggest a ChArUco board. The specific board we validate against: [Calib.io ChArUco 300x200x6 mm, Coarse pattern, Aluminium/LDPE](https://calib.io/products/charuco-targets?variant=9400454807599). Smaller boards from the same line have performed worse in our testing.
+
+Only ChArUco targets are supported today. Other patterns (checkerboard, circle, Kalibr, Halcon) may work but we haven't validated them thoroughly enough to include in this streamlined module. If you have a use case requiring a different target, open an issue.
 
 ![Recommended ChArUco board](assets/charuco-board.png)
 
@@ -37,7 +39,7 @@ In the Viam app, add `viam:camera-calibration` to your machine.
 
 ### Step 3: Configure the pose_tracker
 
-The values below are for the board pictured above — they're here to show how the board's properties map into the config. Use the values from your own board.
+The values below match the recommended board from Step 1. **You must replace `camera` with your camera's name.** If you're using a different board, also replace `squares_x`, `squares_y`, `square_length_mm`, and `marker_length_mm` with values from your board's spec sheet.
 
 ```json
 {
@@ -47,15 +49,17 @@ The values below are for the board pictured above — they're here to show how t
   "attributes": {
     "camera": "your-camera-name",
     "dictionary": "DICT_5X5_100",
-    "squares_x": 11,
-    "squares_y": 8,
-    "square_length_mm": 15,
-    "marker_length_mm": 12
+    "squares_x": 14,
+    "squares_y": 9,
+    "square_length_mm": 20,
+    "marker_length_mm": 15
   }
 }
 ```
 
 ### Step 4: Configure the handeye service
+
+The `input_range_override` values below are xArm 6-specific — replace with limits appropriate to your arm.
 
 ```json
 {

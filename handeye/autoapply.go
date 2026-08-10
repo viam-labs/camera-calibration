@@ -10,6 +10,7 @@ import (
 	"go.viam.com/rdk/utils"
 )
 
+// TODO: detect fragment-owned target camera and error early suggesting auto_apply_result=false.
 func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) (bool, error) {
 	quality, qerr := qualityFromResult(result)
 	if qerr != nil {
