@@ -499,6 +499,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	attempt := 0
 	consecutiveFailures := 0
 
+	// TODO: tailor the sweep-failure error to the dominant failure mode (unreachable → widen input_range_override; board-not-detected → camera setup).
 	recordFailure := func(reason string) error {
 		consecutiveFailures++
 		if consecutiveFailures >= h.cfg.MaxConsecutiveFailures {
