@@ -35,7 +35,7 @@ func (h *handeye) checkCameraFrameParent(robotConfig map[string]interface{}) err
 	}
 	cam, err := findComponent(robotConfig, targetCamera)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w — if the camera lives inside a fragment, set auto_apply_result: false and apply the returned frame manually", err)
 	}
 	frame, _ := cam["frame"].(map[string]interface{})
 	parent, _ := frame["parent"].(string)

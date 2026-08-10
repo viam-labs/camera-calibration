@@ -10,7 +10,6 @@ import (
 	"go.viam.com/rdk/utils"
 )
 
-// TODO: detect fragment-owned target camera and error early suggesting auto_apply_result=false.
 func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) (bool, error) {
 	quality, qerr := qualityFromResult(result)
 	if qerr != nil {
@@ -167,7 +166,7 @@ func deriveTargetCameraFromPoseTracker(robotConfig map[string]interface{}, poseT
 func setCameraFrame(robotConfig map[string]interface{}, cameraName string, translation, orientation map[string]interface{}) error {
 	cam, err := findComponent(robotConfig, cameraName)
 	if err != nil {
-		return fmt.Errorf("%w; if the camera lives inside a fragment, declare it in components (fragment-only cameras not yet supported by auto_apply_result)", err)
+		return fmt.Errorf("%w — if the camera lives inside a fragment, set auto_apply_result: false and apply the returned frame manually", err)
 	}
 	frame, _ := cam["frame"].(map[string]interface{})
 	if frame == nil {

@@ -263,7 +263,7 @@ func TestSetCameraFrameMissingCameraErrors(t *testing.T) {
 	err := setCameraFrame(map[string]interface{}{}, "cam", nil, nil)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, `component "cam" not found`)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "fragment-only cameras not yet supported")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "auto_apply_result: false")
 }
 
 func TestSetCameraFramePreservesOtherComponentFields(t *testing.T) {

@@ -6,6 +6,22 @@ import (
 	"go.viam.com/test"
 )
 
+func TestCheckCameraFrameParentSuggestsAutoApplyFalseWhenCameraMissing(t *testing.T) {
+	h := &handeye{cfg: &Config{Arm: "my-arm", PoseTracker: "pt"}}
+	robotConfig := map[string]interface{}{
+		"components": []interface{}{
+			map[string]interface{}{
+				"name":       "pt",
+				"attributes": map[string]interface{}{"camera": "cam"},
+			},
+			// no "cam" component — simulates a fragment-owned camera
+		},
+	}
+	err := h.checkCameraFrameParent(robotConfig)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "auto_apply_result: false")
+}
+
 func TestCheckCameraFrameParentAccepts(t *testing.T) {
 	h := &handeye{cfg: &Config{Arm: "my-arm", PoseTracker: "pt"}}
 	robotConfig := map[string]interface{}{
