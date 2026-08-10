@@ -97,6 +97,7 @@ func TestIntrinsicsJSON(t *testing.T) {
 	c := &charuco{
 		cfg:    &Config{Camera: "cam"},
 		camera: cameraWithIntrinsics(),
+		logger: logging.NewTestLogger(t),
 	}
 	got, err := c.intrinsicsJSON(context.Background())
 	test.That(t, err, test.ShouldBeNil)
@@ -166,4 +167,40 @@ func TestDoCommandMultipleVerbs(t *testing.T) {
 	_, err := c.DoCommand(context.Background(), map[string]interface{}{"detect": nil, "hint": true})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldEqual, "expected exactly one verb in DoCommand, got 2")
+}
+
+func TestReorderRDKToOpenCVDistortion_BrownConrady5(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	in := []float64{0.1, 0.2, 0.3, 0.4, 0.5} // RDK: k1, k2, k3, p1, p2
+	got := reorderRDKToOpenCVDistortion("brown_conrady", in, logger)
+	want := []float64{0.1, 0.2, 0.4, 0.5, 0.3} // OpenCV: k1, k2, p1, p2, k3
+	test.That(t, got, test.ShouldResemble, want)
+}
+
+func TestReorderRDKToOpenCVDistortion_InverseBrownConrady5(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	in := []float64{0.1, 0.2, 0.3, 0.4, 0.5}
+	got := reorderRDKToOpenCVDistortion("inverse_brown_conrady", in, logger)
+	want := []float64{0.1, 0.2, 0.4, 0.5, 0.3}
+	test.That(t, got, test.ShouldResemble, want)
+}
+
+func TestReorderRDKToOpenCVDistortion_UnknownModelPassesThrough(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	in := []float64{0.1, 0.2, 0.3, 0.4, 0.5}
+	got := reorderRDKToOpenCVDistortion("kannala_brandt", in, logger)
+	test.That(t, got, test.ShouldResemble, in)
+}
+
+func TestReorderRDKToOpenCVDistortion_WrongLengthPassesThrough(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	in := []float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8} // 8-param rational
+	got := reorderRDKToOpenCVDistortion("brown_conrady", in, logger)
+	test.That(t, got, test.ShouldResemble, in)
+}
+
+func TestReorderRDKToOpenCVDistortion_EmptyPassesThrough(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	got := reorderRDKToOpenCVDistortion("", []float64{}, logger)
+	test.That(t, got, test.ShouldBeEmpty)
 }

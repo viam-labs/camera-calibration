@@ -298,6 +298,18 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	)
 }
 
+// RDK order [k1, k2, k3, p1, p2] -> OpenCV order [k1, k2, p1, p2, k3].
+func reorderRDKToOpenCVDistortion(model string, params []float64, logger logging.Logger) []float64 {
+	if len(params) == 5 && (model == "brown_conrady" || model == "inverse_brown_conrady") {
+		//nolint:gosec // len(params) == 5 checked above
+		return []float64{params[0], params[1], params[3], params[4], params[2]}
+	}
+	if len(params) > 0 {
+		logger.Warnf("charuco: don't know how to reorder distortion (model=%q, %d params); passing through. If PnP looks off, override 'distortion' in the pose_tracker config with OpenCV order [k1, k2, p1, p2, k3].", model, len(params))
+	}
+	return params
+}
+
 func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 	props, err := c.camera.Properties(ctx)
 	if err != nil {
@@ -313,7 +325,11 @@ func (c *charuco) intrinsicsJSON(ctx context.Context) (string, error) {
 	case c.cfg.Distortion != nil:
 		distortion = c.cfg.Distortion
 	case props.DistortionParams != nil:
-		distortion = props.DistortionParams.Parameters()
+		raw := props.DistortionParams.Parameters()
+		modelStr := string(props.DistortionParams.ModelType())
+		distortion = reorderRDKToOpenCVDistortion(modelStr, raw, c.logger)
+		c.logger.Debugf("charuco: camera %q distortion model=%q raw=%v opencv=%v",
+			c.cfg.Camera, modelStr, raw, distortion)
 	default:
 		return "", fmt.Errorf("charuco: camera %q has no distortion parameters — set `distortion` on this pose_tracker (use [0,0,0,0,0] for cameras that undistort on-device)", c.cfg.Camera)
 	}
