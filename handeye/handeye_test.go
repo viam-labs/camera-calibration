@@ -538,3 +538,26 @@ func TestSolveResponseToResult(t *testing.T) {
 	test.That(t, quality["mean_station_reprojection_px"], test.ShouldEqual, 0.6)
 	test.That(t, quality["max_station_reprojection_px"], test.ShouldEqual, 0.9)
 }
+
+func TestPlanSaveFilename(t *testing.T) {
+	cases := []struct {
+		name     string
+		cfg      Config
+		planDur  time.Duration
+		wantFile string
+		wantOk   bool
+	}{
+		{"save_all wins over slow", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 3000 * time.Millisecond, "capture_plan_request.json", true},
+		{"slow fires above threshold", Config{SaveSlowPlanThresholdMs: 1500}, 1800 * time.Millisecond, "capture_slow_1800ms_plan_request.json", true},
+		{"fast plan skipped", Config{SaveSlowPlanThresholdMs: 1500}, 50 * time.Millisecond, "", false},
+		{"threshold equal skipped", Config{SaveSlowPlanThresholdMs: 1500}, 1500 * time.Millisecond, "", false},
+		{"save_all with fast plan still saves", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 10 * time.Millisecond, "capture_plan_request.json", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := planSaveFilename(&tc.cfg, tc.planDur)
+			test.That(t, got, test.ShouldEqual, tc.wantFile)
+			test.That(t, ok, test.ShouldEqual, tc.wantOk)
+		})
+	}
+}

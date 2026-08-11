@@ -151,6 +151,7 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 | `max_reprojection_error_px`   | No       | 2.0     | Skip auto-apply if the mean per-station board-corner reprojection error exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
 | `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. Raise if your rig legitimately needs many attempts per capture; lower to fail faster. |
 | `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. Default is well above typical successful plans (~20ms), so it only fires for genuinely unusual plans. |
+| `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Noisy — intended for exhaustive offline analysis. Supersedes `save_slow_plan_threshold_ms` (no duplicates). |
 
 
 
