@@ -13,6 +13,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+    outputs:
+      new_version: ${{ steps.new-version.outputs.new_version }}
     steps:
       # actions/checkout@v6.0.2
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -81,3 +83,11 @@ jobs:
           name: ${{ steps.new-version.outputs.new_version }}
           generate_release_notes: true
           make_latest: true
+          draft: false
+
+  deploy:
+    needs: release
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      tag_name: ${{ needs.release.outputs.new_version }}

@@ -1,18 +1,25 @@
 name: Deploy
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.ref_name }}
       - uses: viamrobotics/build-action@v1
         with:
-          version: ${{ github.ref_name }}
-          ref: ${{ github.sha }}
+          version: ${{ inputs.tag_name || github.ref_name }}
+          ref: ${{ inputs.tag_name || github.ref_name }}
           key-id: ${{ secrets.VIAM_API_KEY_ID }}
           key-value: ${{ secrets.VIAM_API_KEY }}
           token: ${{ github.token }}
