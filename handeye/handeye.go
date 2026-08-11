@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erh/vmodutils/file_utils"
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/posetracker"
@@ -28,6 +29,7 @@ import (
 	"go.viam.com/rdk/services/generic"
 	"go.viam.com/rdk/spatialmath"
 
+	"github.com/viam-labs/camera-calibration/internal/fileio"
 	"github.com/viam-labs/camera-calibration/internal/verb"
 	"github.com/viam-labs/camera-calibration/pyrunner"
 )
@@ -120,7 +122,6 @@ const (
 
 type handeye struct {
 	resource.AlwaysRebuild
-	resource.TriviallyCloseable
 
 	name        resource.Name
 	logger      logging.Logger
@@ -128,6 +129,7 @@ type handeye struct {
 	arm         arm.Arm
 	tracker     posetracker.PoseTracker
 	fsService   framesystem.Service
+	fileSaver   *fileio.FileSaver
 	pythonBin   string
 	solvePath   string
 	persistPath string
@@ -204,12 +206,17 @@ func newHandeye(
 		arm:         a,
 		tracker:     tr,
 		fsService:   fsService,
+		fileSaver:   fileio.NewFileSaver(logger),
 		pythonBin:   filepath.Join(moduleRoot, ".venv", "bin", "python"),
 		solvePath:   filepath.Join(moduleRoot, "python", "solve.py"),
 		persistPath: persistFilePath(name.Name),
 	}
 	h.loadLastResult()
 	return h, nil
+}
+
+func (h *handeye) Close(_ context.Context) error {
+	return h.fileSaver.Close()
 }
 
 func (h *handeye) Name() resource.Name {
@@ -494,6 +501,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		return nil, err
 	}
 
+	passID := fmt.Sprintf("camera-calibration-%d", time.Now().Unix())
 	stations := make([]map[string]interface{}, 0, targetCount)
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
 	attempt := 0
@@ -526,7 +534,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 
 		target := nextPose()
 
-		planErr, execErr := h.planAndExecute(ctx, fs, target)
+		planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
 		if execErr != nil {
 			return nil, fmt.Errorf("handeye: attempt %d execute failed, halting sweep: %w", attempt, execErr)
 		}
@@ -589,7 +597,7 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 	return fs, nil
 }
 
-func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose) (planErr, execErr error) {
+func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planErr, execErr error) {
 	armName := h.arm.Name().Name
 	currentInputs, err := h.arm.JointPositions(ctx, nil)
 	if err != nil {
@@ -603,11 +611,14 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 		armName: referenceframe.NewPoseInFrame(referenceframe.World, target),
 	}, nil)
 
-	plan, _, err := armplanning.PlanMotion(ctx, h.logger, &armplanning.PlanRequest{
+	req := &armplanning.PlanRequest{
 		FrameSystem: fs,
 		StartState:  startState,
 		Goals:       []*armplanning.PlanState{goalState},
-	})
+	}
+	planStart := time.Now()
+	plan, _, err := armplanning.PlanMotion(ctx, h.logger, req)
+	planDur := time.Since(planStart)
 	if err != nil {
 		return fmt.Errorf("plan motion: %w", err), nil
 	}
@@ -622,9 +633,39 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	}
 
 	if err := h.arm.MoveThroughJointPositions(ctx, trajectory, nil, nil); err != nil {
+		h.saveFailureArtifacts(ctx, passID, req, trajectory, planDur)
 		return nil, fmt.Errorf("execute trajectory: %w", err)
 	}
 	return nil, nil
+}
+
+func (h *handeye) saveFailureArtifacts(ctx context.Context, passID string, req *armplanning.PlanRequest, trajectory [][]referenceframe.Input, planDur time.Duration) {
+	now := time.Now()
+	saveDir := file_utils.GetPathInCaptureDir(fmt.Sprintf("tag=%s", passID))
+	if err := file_utils.EnsureDir(saveDir); err != nil {
+		h.logger.Warnw("failed to prepare failure-artifact dir", "dir", saveDir, "err", err)
+		return
+	}
+
+	sf := fileio.NewPlanRequestSaveFile(fileio.NewPlanRequestForSaving(req), passID, "execute_failed_plan_request.json", now, planDur)
+	h.fileSaver.SaveAsync(ctx, sf)
+
+	if err := file_utils.SaveJsonFile(trajectory, saveDir, "execute_failed_trajectory.json", now); err != nil {
+		h.logger.Warnw("failed to save execute_failed_trajectory.json", "err", err)
+	}
+
+	// Best-effort read of arm position at the moment of failure; failure to read
+	// shouldn't stop us saving the trajectory/plan.
+	armCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	armInputs, err := h.arm.CurrentInputs(armCtx)
+	if err != nil {
+		h.logger.Warnw("failed to read arm current position for failure artifact", "err", err)
+		return
+	}
+	if saveErr := file_utils.SaveJsonFile(armInputs, saveDir, "execute_failed_arm_position.json", now); saveErr != nil {
+		h.logger.Warnw("failed to save execute_failed_arm_position.json", "err", saveErr)
+	}
 }
 
 type seedResult struct {
