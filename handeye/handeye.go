@@ -61,6 +61,7 @@ type Config struct {
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
 	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
+	SaveAllPlans             bool                            `json:"save_all_plans,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -630,7 +631,7 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	if err != nil {
 		return fmt.Errorf("plan motion: %w", err), nil
 	}
-	h.maybeSaveSlowPlan(ctx, passID, req, planDur)
+	h.maybeSavePlanRequest(ctx, passID, req, planDur)
 
 	trajectory := make([][]referenceframe.Input, 0, len(plan.Trajectory()))
 	for _, fsInputs := range plan.Trajectory() {
@@ -648,14 +649,28 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	return nil, nil
 }
 
-func (h *handeye) maybeSaveSlowPlan(ctx context.Context, passID string, req *armplanning.PlanRequest, planDur time.Duration) {
-	if planDur.Milliseconds() <= int64(h.cfg.SaveSlowPlanThresholdMs) {
+// planSaveFilename returns the file to save a PlanRequest under, or ok=false
+// if no save trigger fires. SaveAllPlans supersedes the slow-plan threshold
+// to avoid double-saving.
+func planSaveFilename(cfg *Config, planDur time.Duration) (string, bool) {
+	switch {
+	case cfg.SaveAllPlans:
+		return "capture_plan_request.json", true
+	case planDur.Milliseconds() > int64(cfg.SaveSlowPlanThresholdMs):
+		return fmt.Sprintf("capture_slow_%dms_plan_request.json", planDur.Milliseconds()), true
+	default:
+		return "", false
+	}
+}
+
+func (h *handeye) maybeSavePlanRequest(ctx context.Context, passID string, req *armplanning.PlanRequest, planDur time.Duration) {
+	filename, ok := planSaveFilename(h.cfg, planDur)
+	if !ok {
 		return
 	}
-	filename := fmt.Sprintf("capture_slow_%dms_plan_request.json", planDur.Milliseconds())
 	sf := fileio.NewPlanRequestSaveFile(fileio.NewPlanRequestForSaving(req), passID, filename, time.Now(), planDur)
 	h.fileSaver.SaveAsync(ctx, sf)
-	h.logger.Infof("handeye: slow plan (%dms), saved to pass=%s file=%s", planDur.Milliseconds(), passID, filename)
+	h.logger.Infof("handeye: saved plan request (planning=%dms) pass=%s file=%s", planDur.Milliseconds(), passID, filename)
 }
 
 func (h *handeye) saveFailureArtifacts(ctx context.Context, passID string, req *armplanning.PlanRequest, trajectory [][]referenceframe.Input, planDur time.Duration) {
