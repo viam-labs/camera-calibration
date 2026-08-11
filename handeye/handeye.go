@@ -301,9 +301,9 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	if err != nil {
 		return nil, fail(fmt.Errorf("handeye: seed: %w", err))
 	}
-	seedCenter := seedRes.BoardInBase.Point()
-	seedRvec := seedRes.BoardInBase.Orientation().AxisAngles().ToR3()
-	h.logger.Infof("handeye: seed board_in_base center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f)",
+	seedCenter := seedRes.BoardInWorld.Point()
+	seedRvec := seedRes.BoardInWorld.Orientation().AxisAngles().ToR3()
+	h.logger.Infof("handeye: seed board_in_world center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f)",
 		seedCenter.X, seedCenter.Y, seedCenter.Z, seedRvec.X, seedRvec.Y, seedRvec.Z)
 
 	if h.cfg.NumPoses < 3 {
@@ -608,14 +608,12 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planErr, execErr error) {
 	armName := h.arm.Name().Name
-	currentInputs, err := h.arm.JointPositions(ctx, nil)
+	fsInputs, err := h.fsService.CurrentInputs(ctx)
 	if err != nil {
-		return fmt.Errorf("get current joints: %w", err), nil
+		return fmt.Errorf("get frame system inputs: %w", err), nil
 	}
 
-	startState := armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{
-		armName: currentInputs,
-	})
+	startState := armplanning.NewPlanState(nil, fsInputs)
 	goalState := armplanning.NewPlanState(referenceframe.FrameSystemPoses{
 		armName: referenceframe.NewPoseInFrame(referenceframe.World, target),
 	}, nil)
@@ -706,7 +704,7 @@ type seedResult struct {
 	ArmJoints     []float64
 	ArmEndPose    spatialmath.Pose
 	BoardInCamera spatialmath.Pose
-	BoardInBase   spatialmath.Pose
+	BoardInWorld  spatialmath.Pose
 }
 
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
@@ -728,14 +726,26 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 		return nil, err
 	}
 
+	// arm.EndPosition returns arm-base coords, but the sweep planner takes
+	// targets as world-frame poses. Ask the frame system for the arm-end
+	// pose in world at the current joints, so bounds and generated targets
+	// naturally live in world.
+	armName := h.arm.Name().Name
+	armEndInWorld, err := h.fsService.TransformPose(ctx,
+		referenceframe.NewPoseInFrame(armName, spatialmath.NewZeroPose()),
+		referenceframe.World, nil)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: transform arm end to world: %w", err)
+	}
+
 	// Nominal camera-at-flange (X = identity); ~50-100mm off in practice, fine for sweep planning.
-	boardInBase := spatialmath.Compose(endPose, boardInCamera)
+	boardInWorld := spatialmath.Compose(armEndInWorld.Pose(), boardInCamera)
 
 	return &seedResult{
 		ArmJoints:     jointsToFloats(joints),
 		ArmEndPose:    endPose,
 		BoardInCamera: boardInCamera,
-		BoardInBase:   boardInBase,
+		BoardInWorld:  boardInWorld,
 	}, nil
 }
 
