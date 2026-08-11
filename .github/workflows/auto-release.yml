@@ -1,0 +1,83 @@
+name: Auto Release on Merge
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: auto-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      # actions/checkout@v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: latest-tag
+        run: |
+          TAG=$(git tag --list --sort=-v:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | head -n 1)
+          if [ -z "$TAG" ]; then
+            TAG="v0.0.0"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Get bump level from merged PR labels
+        id: bump-level
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          LABELS=$(gh api "repos/${REPO}/commits/${COMMIT_SHA}/pulls" \
+            --jq '.[0].labels[].name' || true)
+
+          if echo "$LABELS" | grep -q "semver:major"; then
+            echo "level=major" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q "semver:minor"; then
+            echo "level=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
+        id: new-version
+        env:
+          LATEST: ${{ steps.latest-tag.outputs.tag }}
+          LEVEL: ${{ steps.bump-level.outputs.level }}
+        run: |
+          VERSION="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          case "$LEVEL" in
+            major) NEW="v$((MAJOR+1)).0.0" ;;
+            minor) NEW="v$MAJOR.$((MINOR+1)).0" ;;
+            patch) NEW="v$MAJOR.$MINOR.$((PATCH+1))" ;;
+          esac
+
+          # Guard against collisions: if the computed tag somehow already
+          # exists, fail loudly rather than silently overwriting a release.
+          if git rev-parse -q --verify "refs/tags/$NEW" >/dev/null; then
+            echo "Computed tag $NEW already exists — refusing to overwrite." >&2
+            exit 1
+          fi
+
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+
+      # softprops/action-gh-release@v2.6.1
+      - name: Create release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          tag_name: ${{ steps.new-version.outputs.new_version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.new-version.outputs.new_version }}
+          generate_release_notes: true
+          make_latest: true
