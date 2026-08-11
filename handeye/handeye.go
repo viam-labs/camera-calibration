@@ -60,6 +60,7 @@ type Config struct {
 	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
 	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
+	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -109,6 +110,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.MaxConsecutiveFailures < 0 {
 		return nil, nil, fmt.Errorf("max_consecutive_failures must be >= 0 (0 uses the default), got %d", cfg.MaxConsecutiveFailures)
 	}
+	if cfg.SaveSlowPlanThresholdMs < 0 {
+		return nil, nil, fmt.Errorf("save_slow_plan_threshold_ms must be >= 0 (0 uses the default), got %d", cfg.SaveSlowPlanThresholdMs)
+	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
 
@@ -118,6 +122,7 @@ const (
 	defaultMinPoseDiversityDeg      = 30.0
 	defaultMaxReprojectionErrorPx   = 2.0
 	defaultMaxConsecutiveFailures   = 200
+	defaultSaveSlowPlanThresholdMs  = 1500
 )
 
 type handeye struct {
@@ -179,6 +184,9 @@ func newHandeye(
 	}
 	if cfg.MaxConsecutiveFailures == 0 {
 		cfg.MaxConsecutiveFailures = defaultMaxConsecutiveFailures
+	}
+	if cfg.SaveSlowPlanThresholdMs == 0 {
+		cfg.SaveSlowPlanThresholdMs = defaultSaveSlowPlanThresholdMs
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
@@ -622,6 +630,7 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	if err != nil {
 		return fmt.Errorf("plan motion: %w", err), nil
 	}
+	h.maybeSaveSlowPlan(ctx, passID, req, planDur)
 
 	trajectory := make([][]referenceframe.Input, 0, len(plan.Trajectory()))
 	for _, fsInputs := range plan.Trajectory() {
@@ -637,6 +646,16 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 		return nil, fmt.Errorf("execute trajectory: %w", err)
 	}
 	return nil, nil
+}
+
+func (h *handeye) maybeSaveSlowPlan(ctx context.Context, passID string, req *armplanning.PlanRequest, planDur time.Duration) {
+	if planDur.Milliseconds() <= int64(h.cfg.SaveSlowPlanThresholdMs) {
+		return
+	}
+	filename := fmt.Sprintf("capture_slow_%dms_plan_request.json", planDur.Milliseconds())
+	sf := fileio.NewPlanRequestSaveFile(fileio.NewPlanRequestForSaving(req), passID, filename, time.Now(), planDur)
+	h.fileSaver.SaveAsync(ctx, sf)
+	h.logger.Infof("handeye: slow plan (%dms), saved to pass=%s file=%s", planDur.Milliseconds(), passID, filename)
 }
 
 func (h *handeye) saveFailureArtifacts(ctx context.Context, passID string, req *armplanning.PlanRequest, trajectory [][]referenceframe.Input, planDur time.Duration) {
