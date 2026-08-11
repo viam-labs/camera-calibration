@@ -3,9 +3,11 @@ module github.com/viam-labs/camera-calibration
 go 1.25.10
 
 require (
+	github.com/erh/vmodutils v0.4.0
 	github.com/golang/geo v0.0.0-20230421003525-6adc56603217
 	go.viam.com/rdk v1.1.0
 	go.viam.com/test v1.2.5
+	golang.org/x/sync v0.21.0
 )
 
 require (
@@ -215,7 +217,6 @@ require (
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
