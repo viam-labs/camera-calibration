@@ -124,19 +124,28 @@ func mockTracker() *inject.PoseTracker {
 	return tr
 }
 
+func mockFsService() *inject.FrameSystemService {
+	fs := inject.NewFrameSystemService("test-fs")
+	fs.TransformPoseFunc = func(_ context.Context, _ *referenceframe.PoseInFrame, dst string, _ []*referenceframe.LinkInFrame) (*referenceframe.PoseInFrame, error) {
+		return referenceframe.NewPoseInFrame(dst, spatialmath.NewZeroPose()), nil
+	}
+	return fs
+}
+
 func TestSeedReturnsExpectedShape(t *testing.T) {
 	h := &handeye{
-		name:    resource.Name{},
-		logger:  logging.NewTestLogger(t),
-		arm:     mockArm(),
-		tracker: mockTracker(),
+		name:      resource.Name{},
+		logger:    logging.NewTestLogger(t),
+		arm:       mockArm(),
+		tracker:   mockTracker(),
+		fsService: mockFsService(),
 	}
 	resp, err := h.seed(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, resp.ArmJoints, test.ShouldResemble, []float64{0.1, 0.2, 0.3})
 	test.That(t, resp.ArmEndPose, test.ShouldNotBeNil)
 	test.That(t, resp.BoardInCamera, test.ShouldNotBeNil)
-	test.That(t, resp.BoardInBase, test.ShouldNotBeNil)
+	test.That(t, resp.BoardInWorld, test.ShouldNotBeNil)
 }
 
 func TestSeedBoardNotDetectedErrors(t *testing.T) {
