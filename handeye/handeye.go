@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erh/vmodutils/file_utils"
@@ -28,6 +29,7 @@ import (
 	"go.viam.com/rdk/robot/framesystem"
 	"go.viam.com/rdk/services/generic"
 	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/utils"
 
 	"github.com/viam-labs/camera-calibration/internal/fileio"
 	"github.com/viam-labs/camera-calibration/internal/verb"
@@ -141,9 +143,11 @@ type handeye struct {
 	persistPath string
 
 	mu         sync.Mutex
-	cancelFn   context.CancelFunc
 	lastResult map[string]interface{}
 	progress   progressState
+
+	worker        *utils.StoppableWorkers
+	workerRunning atomic.Bool
 }
 
 type progressState struct {
@@ -219,12 +223,14 @@ func newHandeye(
 		pythonBin:   filepath.Join(moduleRoot, ".venv", "bin", "python"),
 		solvePath:   filepath.Join(moduleRoot, "python", "solve.py"),
 		persistPath: persistFilePath(name.Name),
+		worker:      utils.NewBackgroundStoppableWorkers(),
 	}
 	h.loadLastResult()
 	return h, nil
 }
 
 func (h *handeye) Close(_ context.Context) error {
+	h.worker.Stop()
 	return h.fileSaver.Close()
 }
 
@@ -245,27 +251,17 @@ func (h *handeye) DoCommand(
 		return h.calibrate(ctx)
 	case "cancel":
 		return h.cancel(ctx)
+	case "status":
+		return h.Status(ctx)
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected calibrate or cancel", v)
+		return nil, fmt.Errorf("unknown verb %q; expected calibrate, cancel, or status", v)
 	}
 }
 
-func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error) {
-	calibCtx, cancel := context.WithCancel(ctx)
-	h.mu.Lock()
-	if h.cancelFn != nil {
-		h.mu.Unlock()
-		cancel()
+func (h *handeye) calibrate(_ context.Context) (map[string]interface{}, error) {
+	if h.workerRunning.Load() {
 		return nil, errors.New("handeye: calibrate already running")
 	}
-	h.cancelFn = cancel
-	h.mu.Unlock()
-
-	defer func() {
-		h.mu.Lock()
-		h.cancelFn = nil
-		h.mu.Unlock()
-	}()
 
 	h.mu.Lock()
 	h.progress = progressState{state: "capturing", startedAt: time.Now()}
@@ -273,33 +269,56 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	h.mu.Unlock()
 	h.deletePersistedResult()
 
-	fail := func(err error) error {
+	h.workerRunning.Store(true)
+	h.worker.Add(func(workerCtx context.Context) {
+		// Escape the 10-min default gRPC timeout the RDK server interceptor
+		// stamps onto every unary call (rdk/grpc/interceptors.go). A hand-eye
+		// sweep can legitimately run longer than 10 min and would otherwise
+		// die mid-flight.
+		timeoutCtx, cancel := context.WithTimeout(workerCtx, time.Hour*24)
+		defer cancel()
+		defer h.workerRunning.Store(false)
+		h.runCalibration(timeoutCtx)
+	})
+
+	return map[string]interface{}{"started": true, "state": "capturing"}, nil
+}
+
+func (h *handeye) runCalibration(ctx context.Context) {
+	fail := func(err error) {
 		h.mu.Lock()
-		h.progress.state = "failed"
-		h.progress.completedAt = time.Now()
-		h.progress.lastError = err.Error()
+		// Don't overwrite a state the cancel verb already set to "cancelled".
+		if h.progress.state != "cancelled" {
+			h.progress.state = "failed"
+			h.progress.completedAt = time.Now()
+			h.progress.lastError = err.Error()
+		}
 		h.mu.Unlock()
-		return err
+		h.logger.Error(err.Error())
 	}
 
 	if h.cfg.autoApplyEnabled() {
-		if err := h.verifyCameraFrameParent(calibCtx); err != nil {
-			return nil, fail(fmt.Errorf("handeye: %w", err))
+		if err := h.verifyCameraFrameParent(ctx); err != nil {
+			fail(fmt.Errorf("handeye: %w", err))
+			return
 		}
 	}
 
-	startingJoints, err := h.arm.JointPositions(calibCtx, nil)
+	startingJoints, err := h.arm.JointPositions(ctx, nil)
 	if err != nil {
-		return nil, fail(fmt.Errorf("handeye: read starting joints: %w", err))
+		fail(fmt.Errorf("handeye: read starting joints: %w", err))
+		return
 	}
-	if cerr := h.checkStartingJointsInBounds(calibCtx, startingJoints); cerr != nil {
-		return nil, fail(cerr)
+	if cerr := h.checkStartingJointsInBounds(ctx, startingJoints); cerr != nil {
+		fail(cerr)
+		return
 	}
-	defer h.returnToStartingPose(ctx, calibCtx, startingJoints)
+	defer h.returnToStartingPose(ctx, startingJoints)
 
-	seedRes, err := h.seed(calibCtx)
+	seedRes, err := h.seed(ctx)
 	if err != nil {
-		return nil, fail(fmt.Errorf("handeye: seed: %w", err))
+		fail(fmt.Errorf("handeye: seed: %w", err))
+		return
 	}
 	seedCenter := seedRes.BoardInWorld.Point()
 	seedRvec := seedRes.BoardInWorld.Orientation().AxisAngles().ToR3()
@@ -307,7 +326,8 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		seedCenter.X, seedCenter.Y, seedCenter.Z, seedRvec.X, seedRvec.Y, seedRvec.Z)
 
 	if h.cfg.NumPoses < 3 {
-		return nil, fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
+		fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
+		return
 	}
 
 	bounds := h.cfg.WorkspaceBounds
@@ -323,27 +343,30 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 		return generatePose(seedCenter, bounds, rng)
 	}
 
-	stations, err := h.sweepAndCapture(calibCtx, h.cfg.NumPoses, nextPose)
+	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
 	if err != nil {
-		return nil, fail(fmt.Errorf("handeye: sweep: %w", err))
+		fail(fmt.Errorf("handeye: sweep: %w", err))
+		return
 	}
 
 	h.mu.Lock()
 	h.progress.state = "solving"
 	h.mu.Unlock()
 
-	result, err := h.runSolver(calibCtx, stations)
+	result, err := h.runSolver(ctx, stations)
 	if err != nil {
-		return nil, fail(err)
+		fail(err)
+		return
 	}
 
 	if h.cfg.autoApplyEnabled() {
 		h.mu.Lock()
 		h.progress.state = "applying"
 		h.mu.Unlock()
-		applied, err := h.autoApply(calibCtx, result)
+		applied, err := h.autoApply(ctx, result)
 		if err != nil {
-			return nil, fail(fmt.Errorf("handeye: auto-apply: %w", err))
+			fail(fmt.Errorf("handeye: auto-apply: %w", err))
+			return
 		}
 		result["auto_applied"] = applied
 	}
@@ -354,7 +377,6 @@ func (h *handeye) calibrate(ctx context.Context) (map[string]interface{}, error)
 	h.progress.completedAt = time.Now()
 	h.mu.Unlock()
 	h.saveLastResult()
-	return result, nil
 }
 
 type solveResponse struct {
@@ -478,8 +500,8 @@ func (h *handeye) checkArmHealth(ctx context.Context, attempt int) error {
 	return nil
 }
 
-func (h *handeye) returnToStartingPose(ctx, calibCtx context.Context, joints []referenceframe.Input) {
-	if calibCtx.Err() != nil {
+func (h *handeye) returnToStartingPose(ctx context.Context, joints []referenceframe.Input) {
+	if ctx.Err() != nil {
 		return
 	}
 	if err := h.arm.MoveThroughJointPositions(ctx, [][]referenceframe.Input{joints}, nil, nil); err != nil {
@@ -490,17 +512,28 @@ func (h *handeye) returnToStartingPose(ctx, calibCtx context.Context, joints []r
 }
 
 func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
-	h.mu.Lock()
-	cancel := h.cancelFn
-	h.mu.Unlock()
-
-	if cancel == nil {
+	if !h.workerRunning.Load() {
 		return map[string]interface{}{"cancelled": true, "was_running": false}, nil
 	}
-	cancel()
+
+	// Mark state as cancelled before worker.Stop() so the sweep goroutine's
+	// fail() sees "cancelled" and doesn't overwrite it with "failed".
+	h.mu.Lock()
+	if h.progress.state != "complete" && h.progress.state != "failed" {
+		h.progress.state = "cancelled"
+		h.progress.completedAt = time.Now()
+	}
+	h.mu.Unlock()
+
+	// arm.Stop physically halts the arm so the in-flight MoveThroughJointPositions
+	// unwinds promptly; worker.Stop() then blocks until the goroutine exits.
 	if err := h.arm.Stop(ctx, nil); err != nil {
 		h.logger.Warnf("handeye: arm.Stop failed during cancel: %v", err)
 	}
+	h.worker.Stop()
+	// StoppableWorkers rejects Add after Stop; recreate so future calibrate calls work.
+	h.worker = utils.NewBackgroundStoppableWorkers()
+
 	return map[string]interface{}{"cancelled": true, "was_running": true}, nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/rdk/testutils/inject"
 	"go.viam.com/test"
+	"go.viam.com/utils"
 )
 
 func validCfg() Config {
@@ -85,7 +86,7 @@ func TestDoCommandDispatch(t *testing.T) {
 		cmd     map[string]interface{}
 		wantErr string
 	}{
-		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate or cancel`},
+		{name: "unknown verb rejected", cmd: map[string]interface{}{"bogus": nil}, wantErr: `unknown verb "bogus"; expected calibrate, cancel, or status`},
 		{name: "empty command rejected", cmd: map[string]interface{}{}, wantErr: "expected exactly one verb in DoCommand, got 0"},
 		{name: "multiple verbs rejected", cmd: map[string]interface{}{"calibrate": nil, "cancel": nil}, wantErr: "expected exactly one verb in DoCommand, got 2"},
 	}
@@ -274,7 +275,7 @@ func TestReturnToStartingPoseSkippedWhenCancelled(t *testing.T) {
 	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	h.returnToStartingPose(context.Background(), cancelled, []referenceframe.Input{0.1, 0.2, 0.3})
+	h.returnToStartingPose(cancelled, []referenceframe.Input{0.1, 0.2, 0.3})
 	test.That(t, called, test.ShouldBeFalse)
 }
 
@@ -287,7 +288,7 @@ func TestReturnToStartingPoseMovesToJoints(t *testing.T) {
 	}
 	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
 	starting := []referenceframe.Input{0.1, 0.2, 0.3}
-	h.returnToStartingPose(context.Background(), context.Background(), starting)
+	h.returnToStartingPose(context.Background(), starting)
 	test.That(t, len(gotPositions), test.ShouldEqual, 1)
 	test.That(t, gotPositions[0], test.ShouldResemble, starting)
 }
@@ -298,7 +299,7 @@ func TestReturnToStartingPoseSwallowsMoveError(t *testing.T) {
 		return errors.New("arm broke")
 	}
 	h := &handeye{name: resource.Name{}, logger: logging.NewTestLogger(t), arm: a}
-	h.returnToStartingPose(context.Background(), context.Background(), []referenceframe.Input{0.1})
+	h.returnToStartingPose(context.Background(), []referenceframe.Input{0.1})
 }
 
 func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {
@@ -316,7 +317,7 @@ func TestCancelWithNoRunningCalibrateIsNoOp(t *testing.T) {
 	test.That(t, stopCalled, test.ShouldBeFalse)
 }
 
-func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
+func TestCancelStopsArmAndMarksCancelled(t *testing.T) {
 	stopCalled := false
 	a := &inject.Arm{}
 	a.StopFunc = func(_ context.Context, _ map[string]interface{}) error {
@@ -324,19 +325,20 @@ func TestCancelInvokesCancelFnAndStopsArm(t *testing.T) {
 		return nil
 	}
 
-	cancelCalled := false
 	h := &handeye{
 		name:     resource.Name{},
 		logger:   logging.NewTestLogger(t),
 		arm:      a,
-		cancelFn: func() { cancelCalled = true },
+		worker:   utils.NewBackgroundStoppableWorkers(),
+		progress: progressState{state: "capturing", startedAt: time.Now()},
 	}
+	h.workerRunning.Store(true)
 
 	resp, err := h.cancel(context.Background())
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, cancelCalled, test.ShouldBeTrue)
 	test.That(t, stopCalled, test.ShouldBeTrue)
 	test.That(t, resp["was_running"], test.ShouldEqual, true)
+	test.That(t, h.progress.state, test.ShouldEqual, "cancelled")
 }
 
 func mustStatus(t *testing.T, h *handeye) map[string]interface{} {
@@ -437,14 +439,13 @@ func TestFormatElapsed(t *testing.T) {
 }
 
 func TestConcurrentCalibrateRejected(t *testing.T) {
-	// Simulate a running calibrate by pre-setting cancelFn. calibrate must
+	// Simulate a running calibrate by pre-setting workerRunning. calibrate must
 	// error before touching arm/tracker, so no arm mocks are needed.
-	_, existing := context.WithCancel(context.Background())
 	h := &handeye{
-		name:     resource.Name{},
-		logger:   logging.NewTestLogger(t),
-		cancelFn: existing,
+		name:   resource.Name{},
+		logger: logging.NewTestLogger(t),
 	}
+	h.workerRunning.Store(true)
 	_, err := h.calibrate(context.Background())
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "already running")

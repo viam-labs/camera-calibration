@@ -11,6 +11,8 @@ if [[ "$OS" == "Linux" ]]; then
             libnlopt-dev
     fi
 elif [[ "$OS" == "Darwin" ]]; then
-    brew tap viamrobotics/brews
-    brew install nlopt-static
+    if [ ! -f /opt/homebrew/include/nlopt.h ] && [ ! -f /usr/local/include/nlopt.h ]; then
+        brew tap viamrobotics/brews
+        brew install nlopt-static
+    fi
 fi
