@@ -207,5 +207,4 @@ States: `ready | capturing | solving | applying | complete | failed`.
 
 ## Not Supported
 
-- **Multi-arm setups**: only single-arm machines are currently supported. On multi-arm rigs, disable the non-target arm's components in your config before calibrating.
 - **Cameras defined via fragments**: auto-apply can't write the calibrated frame back into a fragment-owned camera. Set `auto_apply_result: false` and copy the returned transform into the fragment's camera config manually.
