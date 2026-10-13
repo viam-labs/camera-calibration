@@ -134,3 +134,75 @@ def test_unknown_method_raises():
     stations = _synthetic_stations(x_true, n_stations=5)
     with pytest.raises(ValueError, match="unknown method"):
         solve(stations, method="bogus_method")
+
+
+def _synthetic_eye_to_hand_stations(x_true: np.ndarray, n_stations: int, seed: int = 42) -> list:
+    """eye-to-hand: X_true is camera-in-base; a fixed board-in-gripper rides the arm.
+
+    T_cw = X^-1 @ T_gb @ T_tg (board seen through static camera).
+    """
+    rng = np.random.default_rng(seed)
+    T_tg = _make_transform([0.0, 0.05, -0.1], [50.0, -20.0, 80.0])
+
+    stations = []
+    for _ in range(n_stations):
+        rvec_arm = rng.uniform(-0.5, 0.5, 3)
+        R_arm, _ = cv2.Rodrigues(rvec_arm)
+        T_gb = np.eye(4)
+        T_gb[:3, :3] = R_arm
+        T_gb[:3, 3] = rng.uniform(-100.0, 100.0, 3)
+
+        T_cw = _se3_inverse(x_true) @ T_gb @ T_tg
+
+        stations.append({
+            "T_be": _to_transform_dict(T_gb),
+            "T_cw": _to_transform_dict(T_cw),
+        })
+    return stations
+
+
+def test_round_trip_eye_to_hand():
+    """Recovered X should match synthesized camera-in-base within tight tolerance."""
+    x_true = _make_transform([0.1, -0.2, 0.05], [400.0, 200.0, 500.0])
+    stations = _synthetic_eye_to_hand_stations(x_true, n_stations=15)
+
+    result = solve(stations, method="tsai", calibration_type="eye_to_hand")
+
+    rec = result["camera_in_gripper_mm"]
+    R_rec, _ = cv2.Rodrigues(np.array(rec["rvec"]))
+    t_rec = np.array(rec["translation"])
+
+    R_true = x_true[:3, :3]
+    t_true = x_true[:3, 3]
+
+    R_err = R_rec.T @ R_true
+    rvec_err, _ = cv2.Rodrigues(R_err)
+    angle_err_deg = float(np.degrees(np.linalg.norm(rvec_err)))
+    t_err = float(np.linalg.norm(t_rec - t_true))
+
+    assert t_err < 1.0, f"translation error {t_err:.4f}mm exceeds 1mm tolerance"
+    assert angle_err_deg < 0.1, f"rotation error {angle_err_deg:.4f}° exceeds 0.1° tolerance"
+
+
+def test_residuals_near_zero_for_eye_to_hand():
+    x_true = _make_transform([0.1, -0.2, 0.05], [400.0, 200.0, 500.0])
+    stations = _synthetic_eye_to_hand_stations(x_true, n_stations=15)
+    result = solve(stations, method="tsai", calibration_type="eye_to_hand")
+    assert result["residuals"]["translation_mm"] < 1.0
+    assert result["residuals"]["rotation_deg"] < 0.1
+
+
+def test_eye_in_hand_default_matches_explicit():
+    """Omitting calibration_type must behave identically to passing 'eye_in_hand'."""
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=15)
+    r_default = solve(stations, method="tsai")
+    r_explicit = solve(stations, method="tsai", calibration_type="eye_in_hand")
+    assert r_default == r_explicit
+
+
+def test_unknown_calibration_type_raises():
+    x_true = _make_transform([0.1, -0.2, 0.05], [50.0, 30.0, 10.0])
+    stations = _synthetic_stations(x_true, n_stations=5)
+    with pytest.raises(ValueError, match="unknown calibration_type"):
+        solve(stations, calibration_type="bogus")
