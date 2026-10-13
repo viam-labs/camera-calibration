@@ -168,6 +168,8 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
     "orientation": {"type": "ov_degrees", "value": {"x": 0.002, "y": 0.002, "z": 1.0, "th": 1.16}}
   },
   "quality": {
+    "status": "success",
+    "failed_gates": [],
     "translation_residual_mm": 0.94,
     "rotation_residual_deg": 0.34,
     "pose_diversity_deg": 96.5,
@@ -177,6 +179,8 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
   "auto_applied": true
 }
 ```
+
+`quality.status` is `"success"` when every gate passed, `"failed"` otherwise. `quality.failed_gates` lists which ones tripped (`translation_residual`, `rotation_residual`, `pose_diversity`, `mean_reprojection`).
 
 The `frame` block matches the schema of a camera's `frame` config, so if `auto_applied: false` you can copy it straight into the camera's config.
 

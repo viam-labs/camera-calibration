@@ -10,110 +10,113 @@ import (
 	"go.viam.com/rdk/utils"
 )
 
-func (h *handeye) autoApply(ctx context.Context, result map[string]interface{}) (bool, error) {
-	quality, qerr := qualityFromResult(result)
-	if qerr != nil {
-		return false, qerr
+const (
+	gateTranslationResidual = "translation_residual"
+	gateRotationResidual    = "rotation_residual"
+	gatePoseDiversity       = "pose_diversity"
+	gateMeanReprojection    = "mean_reprojection"
+)
+
+// Non-nil error = malformed solver output (run failure, not quality failure).
+func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string, error) {
+	var failed []string
+
+	poseDiv, ok := quality["pose_diversity_deg"].(float64)
+	if !ok {
+		return nil, errors.New("solve result missing quality.pose_diversity_deg")
 	}
-	if pass, err := h.passesPoseDiversityThreshold(quality); err != nil {
-		return false, err
-	} else if !pass {
-		return false, nil
-	}
-	if pass, err := h.passesResidualThresholds(quality); err != nil {
-		return false, err
-	} else if !pass {
-		return false, nil
-	}
-	if pass, err := h.passesReprojectionThreshold(quality); err != nil {
-		return false, err
-	} else if !pass {
-		return false, nil
+	if poseDiv < h.cfg.MinPoseDiversityDeg {
+		h.logger.Warnf(
+			"handeye: pose diversity (%.2f°) below threshold (%.2f°) — arm rotations too clustered for a well-determined solve",
+			poseDiv, h.cfg.MinPoseDiversityDeg,
+		)
+		failed = append(failed, gatePoseDiversity)
 	}
 
+	transResidual, ok := quality["translation_residual_mm"].(float64)
+	if !ok {
+		return nil, errors.New("solve result missing quality.translation_residual_mm")
+	}
+	if transResidual > h.cfg.MaxTranslationResidualMM {
+		h.logger.Warnf("handeye: translation residual (%.2fmm) exceeds threshold (%.2fmm)",
+			transResidual, h.cfg.MaxTranslationResidualMM)
+		failed = append(failed, gateTranslationResidual)
+	}
+
+	rotResidual, ok := quality["rotation_residual_deg"].(float64)
+	if !ok {
+		return nil, errors.New("solve result missing quality.rotation_residual_deg")
+	}
+	if rotResidual > h.cfg.MaxRotationResidualDeg {
+		h.logger.Warnf("handeye: rotation residual (%.2f°) exceeds threshold (%.2f°)",
+			rotResidual, h.cfg.MaxRotationResidualDeg)
+		failed = append(failed, gateRotationResidual)
+	}
+
+	meanReproj, ok := quality["mean_station_reprojection_px"].(float64)
+	if !ok {
+		return nil, errors.New("solve result missing quality.mean_station_reprojection_px")
+	}
+	if meanReproj > h.cfg.MaxReprojectionErrorPx {
+		h.logger.Warnf(
+			"handeye: mean station reprojection error (%.2f px) exceeds threshold (%.2f px) — detections look inconsistent, check intrinsics/distortion/focus",
+			meanReproj, h.cfg.MaxReprojectionErrorPx,
+		)
+		failed = append(failed, gateMeanReprojection)
+	}
+
+	return failed, nil
+}
+
+func stampQualityStatus(quality map[string]interface{}, failedGates []string) {
+	if failedGates == nil {
+		failedGates = []string{}
+	}
+	if len(failedGates) == 0 {
+		quality["status"] = "success"
+	} else {
+		quality["status"] = "failed"
+	}
+	quality["failed_gates"] = failedGates
+}
+
+func (h *handeye) applyToConfig(ctx context.Context, result map[string]interface{}) error {
 	partID := os.Getenv(utils.MachinePartIDEnvVar)
 	if partID == "" {
-		return false, fmt.Errorf("%s env var not set", utils.MachinePartIDEnvVar)
+		return fmt.Errorf("%s env var not set", utils.MachinePartIDEnvVar)
 	}
 
 	client, err := app.CreateViamClientFromEnvVars(ctx, nil, h.logger)
 	if err != nil {
-		return false, fmt.Errorf("create app client: %w", err)
+		return fmt.Errorf("create app client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
 
 	appClient := client.AppClient()
 	part, _, err := appClient.GetRobotPart(ctx, partID)
 	if err != nil {
-		return false, fmt.Errorf("fetch robot part: %w", err)
+		return fmt.Errorf("fetch robot part: %w", err)
 	}
 
 	targetCamera, err := h.resolveTargetCamera(part.RobotConfig)
 	if err != nil {
-		return false, fmt.Errorf("resolve target camera: %w", err)
+		return fmt.Errorf("resolve target camera: %w", err)
 	}
 
 	translation, orientation, err := frameFromResult(result)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	if err := setCameraFrame(part.RobotConfig, targetCamera, translation, orientation); err != nil {
-		return false, err
+		return err
 	}
 
 	if _, err := appClient.UpdateRobotPart(ctx, partID, part.Name, part.RobotConfig); err != nil {
-		return false, fmt.Errorf("update robot part: %w", err)
+		return fmt.Errorf("update robot part: %w", err)
 	}
 	h.logger.Infof("handeye: auto-applied calibrated frame to camera %q", targetCamera)
-	return true, nil
-}
-
-func (h *handeye) passesPoseDiversityThreshold(quality map[string]interface{}) (bool, error) {
-	diversity, ok := quality["pose_diversity_deg"].(float64)
-	if !ok {
-		return false, errors.New("solve result missing quality.pose_diversity_deg")
-	}
-	if diversity < h.cfg.MinPoseDiversityDeg {
-		h.logger.Warnf(
-			"handeye: pose diversity (%.2f°) below threshold (%.2f°); skipping auto-apply — arm rotations too clustered for a well-determined solve",
-			diversity, h.cfg.MinPoseDiversityDeg,
-		)
-		return false, nil
-	}
-	return true, nil
-}
-
-func (h *handeye) passesResidualThresholds(quality map[string]interface{}) (bool, error) {
-	transResidual, ok := quality["translation_residual_mm"].(float64)
-	if !ok {
-		return false, errors.New("solve result missing quality.translation_residual_mm")
-	}
-	rotResidual, ok := quality["rotation_residual_deg"].(float64)
-	if !ok {
-		return false, errors.New("solve result missing quality.rotation_residual_deg")
-	}
-	if transResidual > h.cfg.MaxTranslationResidualMM || rotResidual > h.cfg.MaxRotationResidualDeg {
-		h.logger.Warnf("handeye: residuals (%.2fmm / %.2f°) exceed threshold (%.2fmm / %.2f°); skipping auto-apply",
-			transResidual, rotResidual, h.cfg.MaxTranslationResidualMM, h.cfg.MaxRotationResidualDeg)
-		return false, nil
-	}
-	return true, nil
-}
-
-func (h *handeye) passesReprojectionThreshold(quality map[string]interface{}) (bool, error) {
-	meanReproj, ok := quality["mean_station_reprojection_px"].(float64)
-	if !ok {
-		return false, errors.New("solve result missing quality.mean_station_reprojection_px")
-	}
-	if meanReproj > h.cfg.MaxReprojectionErrorPx {
-		h.logger.Warnf(
-			"handeye: mean station reprojection error (%.2f px) exceeds threshold (%.2f px); skipping auto-apply — detections look inconsistent, check intrinsics/distortion/focus",
-			meanReproj, h.cfg.MaxReprojectionErrorPx,
-		)
-		return false, nil
-	}
-	return true, nil
+	return nil
 }
 
 func (h *handeye) resolveTargetCamera(robotConfig map[string]interface{}) (string, error) {
