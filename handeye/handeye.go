@@ -359,16 +359,31 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		return
 	}
 
+	quality, err := qualityFromResult(result)
+	if err != nil {
+		fail(fmt.Errorf("handeye: %w", err))
+		return
+	}
+	failedGates, err := h.evaluateQualityGates(quality)
+	if err != nil {
+		fail(fmt.Errorf("handeye: evaluate quality gates: %w", err))
+		return
+	}
+	stampQualityStatus(quality, failedGates)
+
 	if h.cfg.autoApplyEnabled() {
 		h.mu.Lock()
 		h.progress.state = "applying"
 		h.mu.Unlock()
-		applied, err := h.autoApply(ctx, result)
-		if err != nil {
-			fail(fmt.Errorf("handeye: auto-apply: %w", err))
-			return
+		if len(failedGates) > 0 {
+			result["auto_applied"] = false
+		} else {
+			if err := h.applyToConfig(ctx, result); err != nil {
+				fail(fmt.Errorf("handeye: auto-apply: %w", err))
+				return
+			}
+			result["auto_applied"] = true
 		}
-		result["auto_applied"] = applied
 	}
 
 	h.mu.Lock()

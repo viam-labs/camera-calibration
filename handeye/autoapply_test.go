@@ -24,113 +24,96 @@ func TestAutoApplyEnabledRespectsExplicitTrue(t *testing.T) {
 	test.That(t, cfg.autoApplyEnabled(), test.ShouldBeTrue)
 }
 
-func TestPassesResidualThresholdsBelowLimits(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxTranslationResidualMM: 5.0, MaxRotationResidualDeg: 2.0},
+func goodQuality() map[string]interface{} {
+	return map[string]interface{}{
+		"translation_residual_mm":      1.5,
+		"rotation_residual_deg":        0.5,
+		"pose_diversity_deg":           96.0,
+		"mean_station_reprojection_px": 0.6,
 	}
-	pass, err := h.passesResidualThresholds(map[string]interface{}{
-		"translation_residual_mm": 1.5,
-		"rotation_residual_deg":   0.5,
-	})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeTrue)
 }
 
-func TestPassesResidualThresholdsOverTranslation(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxTranslationResidualMM: 5.0, MaxRotationResidualDeg: 2.0},
+func defaultGateCfg() *Config {
+	return &Config{
+		MaxTranslationResidualMM: 5.0,
+		MaxRotationResidualDeg:   2.0,
+		MinPoseDiversityDeg:      30.0,
+		MaxReprojectionErrorPx:   2.0,
 	}
-	pass, err := h.passesResidualThresholds(map[string]interface{}{
-		"translation_residual_mm": 10.0,
-		"rotation_residual_deg":   0.5,
-	})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeFalse)
 }
 
-func TestPassesResidualThresholdsOverRotation(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxTranslationResidualMM: 5.0, MaxRotationResidualDeg: 2.0},
-	}
-	pass, err := h.passesResidualThresholds(map[string]interface{}{
-		"translation_residual_mm": 1.0,
-		"rotation_residual_deg":   5.0,
-	})
+func TestEvaluateQualityGatesAllPass(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	failed, err := h.evaluateQualityGates(goodQuality())
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeFalse)
+	test.That(t, failed, test.ShouldBeEmpty)
 }
 
-func TestPassesPoseDiversityAboveThreshold(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MinPoseDiversityDeg: 30.0},
-	}
-	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{"pose_diversity_deg": 96.0})
+func TestEvaluateQualityGatesTranslationFails(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["translation_residual_mm"] = 10.0
+	failed, err := h.evaluateQualityGates(q)
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeTrue)
+	test.That(t, failed, test.ShouldResemble, []string{gateTranslationResidual})
 }
 
-func TestPassesPoseDiversityBelowThreshold(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MinPoseDiversityDeg: 30.0},
-	}
-	pass, err := h.passesPoseDiversityThreshold(map[string]interface{}{"pose_diversity_deg": 12.5})
+func TestEvaluateQualityGatesRotationFails(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["rotation_residual_deg"] = 5.0
+	failed, err := h.evaluateQualityGates(q)
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeFalse)
+	test.That(t, failed, test.ShouldResemble, []string{gateRotationResidual})
 }
 
-func TestPassesPoseDiversityMissingFieldErrors(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MinPoseDiversityDeg: 30.0},
-	}
-	_, err := h.passesPoseDiversityThreshold(map[string]interface{}{})
+func TestEvaluateQualityGatesPoseDiversityFails(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["pose_diversity_deg"] = 12.5
+	failed, err := h.evaluateQualityGates(q)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldResemble, []string{gatePoseDiversity})
+}
+
+func TestEvaluateQualityGatesReprojectionFails(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["mean_station_reprojection_px"] = 3.4
+	failed, err := h.evaluateQualityGates(q)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldResemble, []string{gateMeanReprojection})
+}
+
+func TestEvaluateQualityGatesMultipleFail(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["pose_diversity_deg"] = 12.5
+	q["mean_station_reprojection_px"] = 3.4
+	failed, err := h.evaluateQualityGates(q)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldResemble, []string{gatePoseDiversity, gateMeanReprojection})
+}
+
+func TestEvaluateQualityGatesMissingFieldErrors(t *testing.T) {
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	_, err := h.evaluateQualityGates(map[string]interface{}{})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "pose_diversity_deg")
 }
 
-func TestPassesResidualThresholdsMissingFieldErrors(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxTranslationResidualMM: 5.0, MaxRotationResidualDeg: 2.0},
-	}
-	_, err := h.passesResidualThresholds(map[string]interface{}{})
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "translation_residual_mm")
+func TestStampQualityStatusSuccess(t *testing.T) {
+	q := map[string]interface{}{}
+	stampQualityStatus(q, nil)
+	test.That(t, q["status"], test.ShouldEqual, "success")
+	test.That(t, q["failed_gates"], test.ShouldResemble, []string{})
 }
 
-func TestPassesReprojectionBelowThreshold(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
-	}
-	pass, err := h.passesReprojectionThreshold(map[string]interface{}{"mean_station_reprojection_px": 0.6})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeTrue)
-}
-
-func TestPassesReprojectionAboveThreshold(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
-	}
-	pass, err := h.passesReprojectionThreshold(map[string]interface{}{"mean_station_reprojection_px": 3.4})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, pass, test.ShouldBeFalse)
-}
-
-func TestPassesReprojectionMissingFieldErrors(t *testing.T) {
-	h := &handeye{
-		logger: logging.NewTestLogger(t),
-		cfg:    &Config{MaxReprojectionErrorPx: 2.0},
-	}
-	_, err := h.passesReprojectionThreshold(map[string]interface{}{})
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "mean_station_reprojection_px")
+func TestStampQualityStatusFailed(t *testing.T) {
+	q := map[string]interface{}{}
+	stampQualityStatus(q, []string{gatePoseDiversity, gateMeanReprojection})
+	test.That(t, q["status"], test.ShouldEqual, "failed")
+	test.That(t, q["failed_gates"], test.ShouldResemble, []string{gatePoseDiversity, gateMeanReprojection})
 }
 
 func TestResolveTargetCameraUsesConfigOverride(t *testing.T) {
