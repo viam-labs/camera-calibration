@@ -17,9 +17,16 @@ _METHODS = {
     "daniilidis": cv2.CALIB_HAND_EYE_DANIILIDIS,
 }
 
+_CALIBRATION_TYPES = ("eye_in_hand", "eye_to_hand")
 
-def solve(stations: list, method: str = "tsai") -> dict:
-    """Solve for camera-in-gripper transform (X) via AX=XB hand-eye calibration.
+
+def solve(stations: list, method: str = "tsai", calibration_type: str = "eye_in_hand") -> dict:
+    """Solve for camera transform (X) via AX=XB hand-eye calibration.
+
+    For eye_in_hand (camera on arm, board in world) X is camera-in-gripper.
+    For eye_to_hand (camera static, board on arm) X is camera-in-base; the
+    arm poses are inverted before cv2.calibrateHandEye which flips the output
+    accordingly.
 
     Args:
         stations: list of {"T_be": {...}, "T_cw": {...}}. Each transform is
@@ -28,10 +35,11 @@ def solve(stations: list, method: str = "tsai") -> dict:
             T_be = gripper-in-base (from arm). T_cw = board-in-camera (from
             pose_tracker).
         method: one of "tsai", "park", "horaud", "andreff", "daniilidis".
+        calibration_type: "eye_in_hand" (default) or "eye_to_hand".
 
     Returns:
         {
-            "camera_in_gripper_mm": {
+            "camera_in_gripper_mm": {   # historical key; for eye_to_hand this holds camera-in-base
                 "translation": [x, y, z],
                 "rvec": [rx, ry, rz],
             },
@@ -42,44 +50,48 @@ def solve(stations: list, method: str = "tsai") -> dict:
         }
 
     Raises:
-        ValueError: fewer than 3 stations or unknown method.
+        ValueError: fewer than 3 stations, unknown method, or unknown calibration_type.
     """
     if len(stations) < 3:
         raise ValueError(f"need at least 3 stations for hand-eye calibration, got {len(stations)}")
     if method not in _METHODS:
         raise ValueError(f"unknown method {method!r}; must be one of {sorted(_METHODS)}")
+    if calibration_type not in _CALIBRATION_TYPES:
+        raise ValueError(f"unknown calibration_type {calibration_type!r}; must be one of {list(_CALIBRATION_TYPES)}")
 
-    R_gripper2base = []
-    t_gripper2base = []
+    R_arm = []
+    t_arm = []
     R_target2cam = []
     t_target2cam = []
 
     for station in stations:
-        be = station["T_be"]
-        cw = station["T_cw"]
+        R_be, _ = cv2.Rodrigues(np.array(station["T_be"]["rvec"], dtype=np.float64))
+        t_be = np.array(station["T_be"]["translation"], dtype=np.float64).reshape(3, 1)
+        if calibration_type == "eye_to_hand":
+            R_arm.append(R_be.T)
+            t_arm.append(-R_be.T @ t_be)
+        else:
+            R_arm.append(R_be)
+            t_arm.append(t_be)
 
-        R_be, _ = cv2.Rodrigues(np.array(be["rvec"], dtype=np.float64))
-        R_gripper2base.append(R_be)
-        t_gripper2base.append(np.array(be["translation"], dtype=np.float64).reshape(3, 1))
-
-        R_cw, _ = cv2.Rodrigues(np.array(cw["rvec"], dtype=np.float64))
+        R_cw, _ = cv2.Rodrigues(np.array(station["T_cw"]["rvec"], dtype=np.float64))
         R_target2cam.append(R_cw)
-        t_target2cam.append(np.array(cw["translation"], dtype=np.float64).reshape(3, 1))
+        t_target2cam.append(np.array(station["T_cw"]["translation"], dtype=np.float64).reshape(3, 1))
 
-    R_cam2gripper, t_cam2gripper = cv2.calibrateHandEye(
-        R_gripper2base, t_gripper2base,
+    R_X, t_X = cv2.calibrateHandEye(
+        R_arm, t_arm,
         R_target2cam, t_target2cam,
         method=_METHODS[method],
     )
 
-    trans_residual_mm, rot_residual_deg = _residuals(stations, R_cam2gripper, t_cam2gripper)
+    trans_residual_mm, rot_residual_deg = _residuals(R_arm, t_arm, R_target2cam, t_target2cam, R_X, t_X)
     pose_diversity_deg = _pose_diversity(stations)
     mean_reproj_px, max_reproj_px = _reprojection_stats(stations)
 
-    rvec, _ = cv2.Rodrigues(R_cam2gripper)
+    rvec, _ = cv2.Rodrigues(R_X)
     return {
         "camera_in_gripper_mm": {
-            "translation": t_cam2gripper.flatten().tolist(),
+            "translation": t_X.flatten().tolist(),
             "rvec": rvec.flatten().tolist(),
         },
         "residuals": {
@@ -120,12 +132,23 @@ def _hmat(pose: dict) -> np.ndarray:
     return T
 
 
-def _residuals(stations: list, R_cam2gripper: np.ndarray, t_cam2gripper: np.ndarray) -> tuple:
+def _residuals(R_arm, t_arm, R_target2cam, t_target2cam, R_X, t_X):
+    # T_arm @ X @ T_cw is constant across stations: board-in-base for eye-in-hand,
+    # board-in-gripper for eye-to-hand (R_arm is already inverted in that case).
     X = np.eye(4)
-    X[:3, :3] = R_cam2gripper
-    X[:3, 3] = t_cam2gripper.flatten()
+    X[:3, :3] = R_X
+    X[:3, 3] = t_X.flatten()
 
-    predictions = [_hmat(s["T_be"]) @ X @ _hmat(s["T_cw"]) for s in stations]
+    predictions = []
+    for R_a, t_a, R_tc, t_tc in zip(R_arm, t_arm, R_target2cam, t_target2cam):
+        T_arm = np.eye(4)
+        T_arm[:3, :3] = R_a
+        T_arm[:3, 3] = t_a.flatten()
+        T_tc = np.eye(4)
+        T_tc[:3, :3] = R_tc
+        T_tc[:3, 3] = t_tc.flatten()
+        predictions.append(T_arm @ X @ T_tc)
+
     trans = np.array([p[:3, 3] for p in predictions])
     mean_trans = trans.mean(axis=0)
     trans_residual = float(np.mean(np.linalg.norm(trans - mean_trans, axis=1)))
@@ -147,7 +170,11 @@ def main() -> None:
         sys.stderr.write("usage: solve.py <input_json_path>\n")
         sys.exit(2)
     data = json.loads(Path(sys.argv[1]).read_text())
-    result = solve(data["stations"], data.get("method", "tsai"))
+    result = solve(
+        data["stations"],
+        data.get("method", "tsai"),
+        data.get("calibration_type", "eye_in_hand"),
+    )
     print(json.dumps(result))
 
 
