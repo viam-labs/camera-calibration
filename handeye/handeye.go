@@ -399,7 +399,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	const maxVisTries = 50
 	var prefilterRejections int
-	nextPose := func() spatialmath.Pose {
+	generateFiltered := func() spatialmath.Pose {
 		for i := 0; i < maxVisTries; i++ {
 			p := generatePose(lookAt, bounds, rng, forwardInTarget)
 			if visParams == nil {
@@ -418,6 +418,27 @@ func (h *handeye) runCalibration(ctx context.Context) {
 			prefilterRejections++
 		}
 		return generatePose(lookAt, bounds, rng, forwardInTarget)
+	}
+
+	pool := &posePool{}
+	for pool.len() < h.cfg.NumPoses*3 {
+		pool.add(generateFiltered())
+	}
+	const poolRefillThreshold = 5
+	nextPose := func() spatialmath.Pose {
+		if pool.len() < poolRefillThreshold {
+			for i := 0; i < h.cfg.NumPoses; i++ {
+				pool.add(generateFiltered())
+			}
+		}
+		current, cerr := h.arm.EndPosition(ctx, nil)
+		if cerr != nil {
+			h.logger.Warnf("handeye: skipping TSP ordering (arm.EndPosition failed): %v", cerr)
+			chosen := pool.poses[0]
+			pool.poses = pool.poses[1:]
+			return chosen
+		}
+		return pool.popNearest(current)
 	}
 
 	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
