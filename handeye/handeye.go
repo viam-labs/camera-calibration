@@ -158,7 +158,7 @@ const (
 	defaultSaveSlowPlanThresholdMs  = 1500
 
 	// start checking calibration quality after this many captures; stop as soon as it passes
-	minPosesForEarlyStop = 10
+	minPosesForEarlyStop = 15
 	// hard cap so a stubbornly-failing run gives up instead of spinning forever
 	maxPoses = 40
 )
