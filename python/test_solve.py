@@ -63,7 +63,7 @@ def test_round_trip_tsai():
 
     result = solve(stations, method="tsai")
 
-    rec = result["camera_in_gripper_mm"]
+    rec = result["camera_in_parent_mm"]
     R_rec, _ = cv2.Rodrigues(np.array(rec["rvec"]))
     t_rec = np.array(rec["translation"])
 
@@ -168,7 +168,7 @@ def test_round_trip_eye_to_hand():
 
     result = solve(stations, method="tsai", calibration_type="eye_to_hand")
 
-    rec = result["camera_in_gripper_mm"]
+    rec = result["camera_in_parent_mm"]
     R_rec, _ = cv2.Rodrigues(np.array(rec["rvec"]))
     t_rec = np.array(rec["translation"])
 

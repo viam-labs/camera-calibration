@@ -39,7 +39,7 @@ def solve(stations: list, method: str = "tsai", calibration_type: str = "eye_in_
 
     Returns:
         {
-            "camera_in_gripper_mm": {   # historical key; for eye_to_hand this holds camera-in-base
+            "camera_in_parent_mm": {   # camera-in-gripper for eye_in_hand, camera-in-base for eye_to_hand
                 "translation": [x, y, z],
                 "rvec": [rx, ry, rz],
             },
@@ -90,7 +90,7 @@ def solve(stations: list, method: str = "tsai", calibration_type: str = "eye_in_
 
     rvec, _ = cv2.Rodrigues(R_X)
     return {
-        "camera_in_gripper_mm": {
+        "camera_in_parent_mm": {
             "translation": t_X.flatten().tolist(),
             "rvec": rvec.flatten().tolist(),
         },
