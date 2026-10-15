@@ -195,6 +195,7 @@ type progressState struct {
 	startedAt          time.Time
 	completedAt        time.Time
 	lastError          string
+	lastQuality        map[string]interface{}
 }
 
 func newHandeye(
@@ -447,7 +448,14 @@ func (h *handeye) runCalibration(ctx context.Context) {
 			return false
 		}
 		failedGates, gerr := h.evaluateQualityGates(quality)
-		if gerr != nil || len(failedGates) > 0 {
+		if gerr != nil {
+			return false
+		}
+		stampQualityStatus(quality, failedGates)
+		h.mu.Lock()
+		h.progress.lastQuality = quality
+		h.mu.Unlock()
+		if len(failedGates) > 0 {
 			return false
 		}
 		earlyStopResult = result
@@ -968,8 +976,10 @@ func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
 	resp := map[string]interface{}{
 		"state":               p.state,
 		"positions_captured":  p.positionsCaptured,
-		"positions_required":  maxPoses,
 		"positions_attempted": p.positionsAttempted,
+	}
+	if p.lastQuality != nil {
+		resp["quality"] = p.lastQuality
 	}
 	if !p.startedAt.IsZero() {
 		var elapsed time.Duration
