@@ -21,19 +21,22 @@ func (h *handeye) fetchVisibilityParams(ctx context.Context) (*visibilityParams,
 	if err != nil {
 		return nil, fmt.Errorf("fetch visibility_params from pose_tracker: %w", err)
 	}
+	// In-process DoCommand bypasses gRPC, so numbers may come back as int, int64, or float64.
 	readFloat := func(k string) (float64, error) {
-		v, ok := resp[k].(float64)
-		if !ok {
-			return 0, fmt.Errorf("visibility_params missing %q", k)
+		switch v := resp[k].(type) {
+		case float64:
+			return v, nil
+		case int:
+			return float64(v), nil
+		case int64:
+			return float64(v), nil
+		default:
+			return 0, fmt.Errorf("visibility_params %q wrong type %T", k, resp[k])
 		}
-		return v, nil
 	}
 	readInt := func(k string) (int, error) {
-		v, ok := resp[k].(float64)
-		if !ok {
-			return 0, fmt.Errorf("visibility_params missing %q", k)
-		}
-		return int(v), nil
+		f, rerr := readFloat(k)
+		return int(f), rerr
 	}
 	fx, err := readFloat("fx")
 	if err != nil {
