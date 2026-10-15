@@ -106,14 +106,14 @@ func TestStampQualityStatusSuccess(t *testing.T) {
 	q := map[string]interface{}{}
 	stampQualityStatus(q, nil)
 	test.That(t, q["status"], test.ShouldEqual, "success")
-	test.That(t, q["failed_gates"], test.ShouldResemble, []string{})
+	test.That(t, q["failed_gates"], test.ShouldResemble, []interface{}{})
 }
 
 func TestStampQualityStatusFailed(t *testing.T) {
 	q := map[string]interface{}{}
 	stampQualityStatus(q, []string{gatePoseDiversity, gateMeanReprojection})
 	test.That(t, q["status"], test.ShouldEqual, "failed")
-	test.That(t, q["failed_gates"], test.ShouldResemble, []string{gatePoseDiversity, gateMeanReprojection})
+	test.That(t, q["failed_gates"], test.ShouldResemble, []interface{}{gatePoseDiversity, gateMeanReprojection})
 }
 
 func TestResolveTargetCameraUsesConfigOverride(t *testing.T) {

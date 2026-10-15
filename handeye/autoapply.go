@@ -69,15 +69,17 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 }
 
 func stampQualityStatus(quality map[string]interface{}, failedGates []string) {
-	if failedGates == nil {
-		failedGates = []string{}
-	}
 	if len(failedGates) == 0 {
 		quality["status"] = "success"
 	} else {
 		quality["status"] = "failed"
 	}
-	quality["failed_gates"] = failedGates
+	// protobuf.Struct can't serialize []string; needs []interface{} for ListValue.
+	asAny := make([]interface{}, len(failedGates))
+	for i, g := range failedGates {
+		asAny[i] = g
+	}
+	quality["failed_gates"] = asAny
 }
 
 func (h *handeye) applyToConfig(ctx context.Context, result map[string]interface{}) error {
