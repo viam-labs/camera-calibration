@@ -6,14 +6,10 @@ import (
 	"go.viam.com/rdk/spatialmath"
 )
 
-// 1 radian of orientation delta weighted as ~100mm of linear travel; rough
-// scale match for a typical arm reach.
+// a 1-radian rotation moves the arm end about this far, so position and angle contribute at the same scale
 const orientationWeightMM = 100.0
 
-// travelWeight trades sweep speed for calibration diversity. 0 = pure
-// farthest-from-already-captured (best calibration quality, worst travel
-// time). ∞ = pure nearest-to-current (best travel time, poses cluster). 0.5
-// weights diversity twice as heavily as travel.
+// pose diversity is twice as important as travel time
 const travelWeight = 0.5
 
 type posePool struct {
@@ -23,11 +19,7 @@ type posePool struct {
 func (p *posePool) add(pose spatialmath.Pose) { p.poses = append(p.poses, pose) }
 func (p *posePool) len() int                  { return len(p.poses) }
 
-// popBest removes and returns the pool entry maximizing
-//
-//	diversity_from(captured) - travelWeight * travel_cost(current).
-//
-// First capture (captured empty) collapses to nearest-to-current.
+// first call has no history, so it just picks the nearest pose to where the arm already is
 func (p *posePool) popBest(current spatialmath.Pose, captured []spatialmath.Pose) spatialmath.Pose {
 	bestIdx := 0
 	bestScore := poseScore(p.poses[0], current, captured)
@@ -49,8 +41,6 @@ func poseScore(candidate, current spatialmath.Pose, captured []spatialmath.Pose)
 	return diversityFrom(candidate, captured) - travelWeight*poseTravelCost(current, candidate)
 }
 
-// diversityFrom returns the min distance from candidate to any captured pose;
-// higher = more novel.
 func diversityFrom(candidate spatialmath.Pose, captured []spatialmath.Pose) float64 {
 	minDist := poseTravelCost(candidate, captured[0])
 	for i := 1; i < len(captured); i++ {
