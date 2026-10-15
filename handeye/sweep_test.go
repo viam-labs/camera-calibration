@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/golang/geo/r3"
+	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/test"
 )
 
@@ -21,7 +22,7 @@ func TestLookAtRotationPointsAtTarget(t *testing.T) {
 	from := r3.Vector{X: 100, Y: 0, Z: 400}
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
 
-	rm, err := lookAtRotation(from, target, 0)
+	rm, err := lookAtRotation(from, target, 0, r3.Vector{Z: 1})
 	test.That(t, err, test.ShouldBeNil)
 
 	ov := rm.OrientationVectorRadians()
@@ -32,7 +33,7 @@ func TestLookAtRotationPointsAtTarget(t *testing.T) {
 
 func TestLookAtRotationDegenerateErrors(t *testing.T) {
 	pos := r3.Vector{X: 10, Y: 20, Z: 30}
-	_, err := lookAtRotation(pos, pos, 0)
+	_, err := lookAtRotation(pos, pos, 0, r3.Vector{Z: 1})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "coincides with target")
 }
@@ -55,7 +56,7 @@ func TestGeneratePoseInBounds(t *testing.T) {
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible tests
 
 	for i := 0; i < 20; i++ {
-		p := generatePose(target, bounds, rng)
+		p := generatePose(target, bounds, rng, r3.Vector{Z: 1})
 		pt := p.Point()
 		test.That(t, pt.X, test.ShouldBeGreaterThanOrEqualTo, bounds.X.Min)
 		test.That(t, pt.X, test.ShouldBeLessThanOrEqualTo, bounds.X.Max)
@@ -71,12 +72,26 @@ func TestGeneratePoseAimsAtTarget(t *testing.T) {
 	rng := rand.New(rand.NewSource(42)) //nolint:gosec // deterministic seed for reproducible tests
 
 	for i := 0; i < 10; i++ {
-		p := generatePose(target, testBounds(), rng)
+		p := generatePose(target, testBounds(), rng, r3.Vector{Z: 1})
 		ov := p.Orientation().OrientationVectorRadians()
 		zDir := r3.Vector{X: ov.OX, Y: ov.OY, Z: ov.OZ}
 		expected := target.Sub(p.Point()).Normalize()
 		test.That(t, zDir.Distance(expected), test.ShouldBeLessThan, 1e-6)
 	}
+}
+
+func TestLookAtRotationArbitraryForwardAimsForwardAtTarget(t *testing.T) {
+	from := r3.Vector{X: 100, Y: 0, Z: 0}
+	target := r3.Vector{X: 0, Y: 0, Z: 0}
+	// Local -Z should point at target: pass {Z: -1} as the forward axis.
+	forward := r3.Vector{Z: -1}
+	rm, err := lookAtRotation(from, target, 0, forward)
+	test.That(t, err, test.ShouldBeNil)
+
+	// Apply R to forward via a composed pose; result should equal (target - from).Normalize().
+	expected := target.Sub(from).Normalize()
+	out := spatialmath.Compose(spatialmath.NewPose(r3.Vector{}, rm), spatialmath.NewPoseFromPoint(forward))
+	test.That(t, out.Point().Distance(expected), test.ShouldBeLessThan, 1e-9)
 }
 
 func TestGeneratePoseRollVaries(t *testing.T) {
@@ -92,7 +107,7 @@ func TestGeneratePoseRollVaries(t *testing.T) {
 
 	poses := make([]r3.Vector, 10)
 	for i := range poses {
-		p := generatePose(target, bounds, rng)
+		p := generatePose(target, bounds, rng, r3.Vector{Z: 1})
 		ov := p.Orientation().OrientationVectorRadians()
 		poses[i] = r3.Vector{X: ov.Theta}
 	}

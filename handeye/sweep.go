@@ -38,41 +38,52 @@ func deriveDefaultBounds(boardCenter r3.Vector) WorkspaceBounds {
 	}
 }
 
-// lookAtRotation builds a rotation whose local +Z axis points from `from`
-// toward `target`, with an additional `rollRad` rotation about that axis.
-// The returned matrix rotates local (camera) vectors into `from`/`target`'s frame.
-func lookAtRotation(from, target r3.Vector, rollRad float64) (*spatialmath.RotationMatrix, error) {
-	z := target.Sub(from)
-	if z.Norm() < 1e-9 {
+// perpBasis returns an orthonormal pair spanning the plane perpendicular to axis.
+func perpBasis(axis r3.Vector) (a, b r3.Vector) {
+	ref := r3.Vector{Z: 1}
+	if math.Abs(axis.Dot(ref)) > 0.99 {
+		ref = r3.Vector{X: 1}
+	}
+	a = ref.Sub(axis.Mul(ref.Dot(axis))).Normalize()
+	b = axis.Cross(a)
+	return a, b
+}
+
+// lookAtRotation builds a rotation whose local `forwardLocal` axis points from
+// `from` toward `target`, with an additional `rollRad` rotation about that axis.
+func lookAtRotation(from, target r3.Vector, rollRad float64, forwardLocal r3.Vector) (*spatialmath.RotationMatrix, error) {
+	desired := target.Sub(from)
+	if desired.Norm() < 1e-9 {
 		return nil, fmt.Errorf("look-at position coincides with target")
 	}
-	z = z.Normalize()
+	desired = desired.Normalize()
+	fw := forwardLocal.Normalize()
 
-	// Reference "world up"; fall back to +X if z is nearly parallel to +Z.
-	worldUp := r3.Vector{Z: 1}
-	if math.Abs(z.Dot(worldUp)) > 0.99 {
-		worldUp = r3.Vector{X: 1}
-	}
-
-	xRef := worldUp.Cross(z).Normalize()
-	yRef := z.Cross(xRef)
+	aLocal, bLocal := perpBasis(fw)
+	aWorld, bWorld := perpBasis(desired)
 
 	c, s := math.Cos(rollRad), math.Sin(rollRad)
-	x := xRef.Mul(c).Add(yRef.Mul(s))
-	y := xRef.Mul(-s).Add(yRef.Mul(c))
+	aRolled := aWorld.Mul(c).Add(bWorld.Mul(s))
+	bRolled := aWorld.Mul(-s).Add(bWorld.Mul(c))
 
-	// Row-major 3x3 with columns [x, y, z].
+	// Columns are the images of {aLocal, bLocal, fw} under the rotation.
 	return spatialmath.NewRotationMatrix([]float64{
-		x.X, y.X, z.X,
-		x.Y, y.Y, z.Y,
-		x.Z, y.Z, z.Z,
+		aRolled.X*aLocal.X + bRolled.X*bLocal.X + desired.X*fw.X,
+		aRolled.X*aLocal.Y + bRolled.X*bLocal.Y + desired.X*fw.Y,
+		aRolled.X*aLocal.Z + bRolled.X*bLocal.Z + desired.X*fw.Z,
+		aRolled.Y*aLocal.X + bRolled.Y*bLocal.X + desired.Y*fw.X,
+		aRolled.Y*aLocal.Y + bRolled.Y*bLocal.Y + desired.Y*fw.Y,
+		aRolled.Y*aLocal.Z + bRolled.Y*bLocal.Z + desired.Y*fw.Z,
+		aRolled.Z*aLocal.X + bRolled.Z*bLocal.X + desired.Z*fw.X,
+		aRolled.Z*aLocal.Y + bRolled.Z*bLocal.Y + desired.Z*fw.Y,
+		aRolled.Z*aLocal.Z + bRolled.Z*bLocal.Z + desired.Z*fw.Z,
 	})
 }
 
-// generatePose samples one arm-target pose aimed at target. Roll about the
-// optical axis is uniform in [-π, π]; without roll variation the AX=XB
+// generatePose samples one arm-target pose that aims `forwardLocal` at target.
+// Roll about that axis is uniform in [-π, π]; without roll variation the AX=XB
 // solve is degenerate.
-func generatePose(target r3.Vector, bounds WorkspaceBounds, rng *rand.Rand) spatialmath.Pose {
+func generatePose(target r3.Vector, bounds WorkspaceBounds, rng *rand.Rand, forwardLocal r3.Vector) spatialmath.Pose {
 	for {
 		pos := r3.Vector{
 			X: bounds.X.Min + rng.Float64()*(bounds.X.Max-bounds.X.Min),
@@ -83,7 +94,7 @@ func generatePose(target r3.Vector, bounds WorkspaceBounds, rng *rand.Rand) spat
 			continue
 		}
 		roll := (rng.Float64()*2 - 1) * math.Pi
-		rot, err := lookAtRotation(pos, target, roll)
+		rot, err := lookAtRotation(pos, target, roll, forwardLocal)
 		if err != nil {
 			continue
 		}

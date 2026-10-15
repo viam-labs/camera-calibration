@@ -339,8 +339,9 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	//nolint:gosec // sampling for pose generation, not crypto
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	forwardInArm := seedRes.ForwardInArm
 	nextPose := func() spatialmath.Pose {
-		return generatePose(seedCenter, bounds, rng)
+		return generatePose(seedCenter, bounds, rng, forwardInArm)
 	}
 
 	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
@@ -759,6 +760,7 @@ type seedResult struct {
 	ArmEndPose    spatialmath.Pose
 	BoardInCamera spatialmath.Pose
 	BoardInWorld  spatialmath.Pose
+	ForwardInArm  r3.Vector
 }
 
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
@@ -795,11 +797,18 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	// Nominal camera-at-flange (X = identity); ~50-100mm off in practice, fine for sweep planning.
 	boardInWorld := spatialmath.Compose(armEndInWorld.Pose(), boardInCamera)
 
+	forwardInArm := r3.Vector{Z: 1}
+	boardFromCam := boardInCamera.Point()
+	if n := boardFromCam.Norm(); n > 1e-9 {
+		forwardInArm = boardFromCam.Mul(1.0 / n)
+	}
+
 	return &seedResult{
 		ArmJoints:     jointsToFloats(joints),
 		ArmEndPose:    endPose,
 		BoardInCamera: boardInCamera,
 		BoardInWorld:  boardInWorld,
+		ForwardInArm:  forwardInArm,
 	}, nil
 }
 
