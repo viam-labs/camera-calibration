@@ -87,16 +87,8 @@ func (h *handeye) fetchVisibilityParams(ctx context.Context) (*visibilityParams,
 	}, nil
 }
 
-// boardVisibleAt reports whether at least one of the board test points would
-// project inside the camera image at the given candidate pose. Permissive by
-// design — ChArUco can detect partial boards, so any point in view is enough.
-//
-// For eye-in-hand: candidatePose is the arm end goal, boardInWorld is fixed
-// (from seed), and the camera is approximated as sitting at the arm end.
-// For eye-to-hand: candidatePose is the arm end goal (which carries the
-// board), the board frame is approximated as the arm end, and cameraInWorld
-// is fixed (from seed estimate).
-func (v *visibilityParams) boardVisibleAt(candidatePose, boardInWorld, cameraInWorld spatialmath.Pose) bool {
+// Permissive: ChArUco detects partial boards, so any corner in view is enough.
+func (v *visibilityParams) boardVisibleAt(boardInWorld, cameraInWorld spatialmath.Pose) bool {
 	worldToCamera := spatialmath.PoseInverse(cameraInWorld)
 	for _, cornerInBoard := range v.boardCorners {
 		cornerInWorld := spatialmath.Compose(boardInWorld, spatialmath.NewPoseFromPoint(cornerInBoard)).Point()

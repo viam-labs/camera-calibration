@@ -390,7 +390,6 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	if err != nil {
 		h.logger.Warnf("handeye: skipping visibility pre-filter: %v", err)
 	}
-	// Pre-check context: which pose is fixed, which moves per candidate.
 	var fixedBoardInWorld, fixedCameraInWorld spatialmath.Pose
 	if h.isEyeToHand() {
 		fixedCameraInWorld = seedRes.CameraInWorldEst
@@ -413,7 +412,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 			} else {
 				cameraInWorld = p
 			}
-			if visParams.boardVisibleAt(p, boardInWorld, cameraInWorld) {
+			if visParams.boardVisibleAt(boardInWorld, cameraInWorld) {
 				return p
 			}
 			prefilterRejections++
