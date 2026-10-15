@@ -85,7 +85,6 @@ func newHandeyeDeprecated(ctx context.Context, deps resource.Dependencies, conf 
 type Config struct {
 	Arm                      string                          `json:"arm"`
 	PoseTracker              string                          `json:"pose_tracker"`
-	NumPoses                 int                             `json:"num_poses"`
 	WorkspaceBounds          WorkspaceBounds                 `json:"workspace_bounds"`
 	SettleSeconds            float64                         `json:"settle_seconds"`
 	InputRangeOverride       map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
@@ -111,9 +110,6 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.PoseTracker == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "pose_tracker")
-	}
-	if cfg.NumPoses != 0 && cfg.NumPoses < 3 {
-		return nil, nil, fmt.Errorf("num_poses must be >= 3 (or 0 for the default), got %d", cfg.NumPoses)
 	}
 	if !cfg.WorkspaceBounds.IsZero() {
 		for _, axis := range []struct {
@@ -160,6 +156,11 @@ const (
 	defaultMaxReprojectionErrorPx   = 2.0
 	defaultMaxConsecutiveFailures   = 200
 	defaultSaveSlowPlanThresholdMs  = 1500
+
+	// start checking calibration quality after this many captures; stop as soon as it passes
+	minPosesForEarlyStop = 10
+	// hard cap so a stubbornly-failing run gives up instead of spinning forever
+	maxPoses = 40
 )
 
 type handeye struct {
@@ -206,9 +207,6 @@ func newHandeye(
 	cfg, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.NumPoses == 0 {
-		cfg.NumPoses = 20
 	}
 	if cfg.SettleSeconds == 0 {
 		cfg.SettleSeconds = 2.0
@@ -365,11 +363,6 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		centerPt.X, centerPt.Y, centerPt.Z, centerRvec.X, centerRvec.Y, centerRvec.Z,
 		seedRes.LookAtPoint.X, seedRes.LookAtPoint.Y, seedRes.LookAtPoint.Z)
 
-	if h.cfg.NumPoses < 3 {
-		fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
-		return
-	}
-
 	bounds := h.cfg.WorkspaceBounds
 	if bounds.IsZero() {
 		if h.isEyeToHand() {
@@ -421,14 +414,14 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	}
 
 	pool := &posePool{}
-	for pool.len() < h.cfg.NumPoses*3 {
+	for pool.len() < maxPoses {
 		pool.add(generateFiltered())
 	}
 	const poolRefillThreshold = 5
 	var captured []spatialmath.Pose
 	nextPose := func() (spatialmath.Pose, error) {
 		if pool.len() < poolRefillThreshold {
-			for i := 0; i < h.cfg.NumPoses; i++ {
+			for i := 0; i < maxPoses/2; i++ {
 				pool.add(generateFiltered())
 			}
 		}
@@ -440,7 +433,28 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	}
 	onCaptured := func(p spatialmath.Pose) { captured = append(captured, p) }
 
-	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose, onCaptured)
+	var earlyStopResult map[string]interface{}
+	shouldStop := func(stations []map[string]interface{}) bool {
+		if len(stations) < minPosesForEarlyStop {
+			return false
+		}
+		result, serr := h.runSolver(ctx, stations)
+		if serr != nil {
+			return false
+		}
+		quality, qerr := qualityFromResult(result)
+		if qerr != nil {
+			return false
+		}
+		failedGates, gerr := h.evaluateQualityGates(quality)
+		if gerr != nil || len(failedGates) > 0 {
+			return false
+		}
+		earlyStopResult = result
+		return true
+	}
+
+	stations, err := h.sweepAndCapture(ctx, maxPoses, nextPose, onCaptured, shouldStop)
 	if visParams != nil {
 		h.logger.Infof("handeye: visibility pre-filter rejected %d candidate poses before planning", prefilterRejections)
 	}
@@ -453,10 +467,13 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	h.progress.state = "solving"
 	h.mu.Unlock()
 
-	result, err := h.runSolver(ctx, stations)
-	if err != nil {
-		fail(err)
-		return
+	result := earlyStopResult
+	if result == nil {
+		result, err = h.runSolver(ctx, stations)
+		if err != nil {
+			fail(err)
+			return
+		}
 	}
 
 	quality, err := qualityFromResult(result)
@@ -660,7 +677,7 @@ func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 	return map[string]interface{}{"cancelled": true, "was_running": true}, nil
 }
 
-func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() (spatialmath.Pose, error), onCaptured func(spatialmath.Pose)) ([]map[string]interface{}, error) {
+func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() (spatialmath.Pose, error), onCaptured func(spatialmath.Pose), shouldStop func([]map[string]interface{}) bool) ([]map[string]interface{}, error) {
 	fs, err := h.buildFrameSystem(ctx)
 	if err != nil {
 		return nil, err
@@ -755,6 +772,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Lock()
 		h.progress.positionsCaptured = len(stations)
 		h.mu.Unlock()
+		if shouldStop(stations) {
+			h.logger.Infof("handeye: quality gates passed at %d captures; stopping sweep early", len(stations))
+			break
+		}
 	}
 	return stations, nil
 }
@@ -944,15 +965,10 @@ func (h *handeye) Status(_ context.Context) (map[string]interface{}, error) {
 	result := h.lastResult
 	h.mu.Unlock()
 
-	total := h.cfg.NumPoses
-	if total == 0 {
-		total = 20
-	}
-
 	resp := map[string]interface{}{
 		"state":               p.state,
 		"positions_captured":  p.positionsCaptured,
-		"positions_required":  total,
+		"positions_required":  maxPoses,
 		"positions_attempted": p.positionsAttempted,
 	}
 	if !p.startedAt.IsZero() {

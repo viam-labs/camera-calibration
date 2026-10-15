@@ -22,7 +22,6 @@ func validCfg() Config {
 	return Config{
 		Arm:         "arm",
 		PoseTracker: "tracker",
-		NumPoses:    20,
 		WorkspaceBounds: WorkspaceBounds{
 			X: AxisBounds{Min: -200, Max: 200},
 			Y: AxisBounds{Min: -200, Max: 200},
@@ -41,7 +40,6 @@ func TestConfigValidate(t *testing.T) {
 		{name: "valid", mutate: func(_ *Config) {}, wantErr: ""},
 		{name: "missing arm", mutate: func(c *Config) { c.Arm = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`},
 		{name: "missing pose_tracker", mutate: func(c *Config) { c.PoseTracker = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`},
-		{name: "num_poses too small", mutate: func(c *Config) { c.NumPoses = 2 }, wantErr: "num_poses must be >= 3 (or 0 for the default), got 2"},
 		{name: "workspace_bounds x invalid", mutate: func(c *Config) { c.WorkspaceBounds.X = AxisBounds{Min: 100, Max: 100} }, wantErr: "workspace_bounds.x.min (100) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
 		{name: "workspace_bounds y inverted", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{Min: 200, Max: 100} }, wantErr: "workspace_bounds.y.min (200) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
 		{name: "workspace_bounds partial (only x set)", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{}; c.WorkspaceBounds.Z = AxisBounds{} }, wantErr: "workspace_bounds.y.min (0) must be < max (0); to auto-derive, omit the whole workspace_bounds block"},
@@ -64,13 +62,6 @@ func TestConfigValidate(t *testing.T) {
 			test.That(t, err.Error(), test.ShouldEqual, tt.wantErr)
 		})
 	}
-}
-
-func TestNumPosesZeroValidatesOK(t *testing.T) {
-	cfg := validCfg()
-	cfg.NumPoses = 0
-	_, _, err := cfg.Validate("test")
-	test.That(t, err, test.ShouldBeNil)
 }
 
 func TestSettleSecondsZeroValidatesOK(t *testing.T) {
@@ -353,28 +344,17 @@ func TestStatusInitialReady(t *testing.T) {
 	h := &handeye{
 		name:     resource.Name{},
 		logger:   logging.NewTestLogger(t),
-		cfg:      &Config{NumPoses: 20},
+		cfg:      &Config{},
 		progress: progressState{state: "ready"},
 	}
 	resp := mustStatus(t, h)
 	test.That(t, resp["state"], test.ShouldEqual, "ready")
 	test.That(t, resp["positions_captured"], test.ShouldEqual, 0)
-	test.That(t, resp["positions_required"], test.ShouldEqual, 20)
+	test.That(t, resp["positions_required"], test.ShouldEqual, maxPoses)
 	test.That(t, resp["positions_attempted"], test.ShouldEqual, 0)
 	test.That(t, resp, test.ShouldNotContainKey, "elapsed_time")
 	test.That(t, resp, test.ShouldNotContainKey, "last_error")
 	test.That(t, resp, test.ShouldNotContainKey, "translation")
-}
-
-func TestStatusDefaultsTotalPositionsWhenConfigZero(t *testing.T) {
-	h := &handeye{
-		name:     resource.Name{},
-		logger:   logging.NewTestLogger(t),
-		cfg:      &Config{NumPoses: 0},
-		progress: progressState{state: "ready"},
-	}
-	resp := mustStatus(t, h)
-	test.That(t, resp["positions_required"], test.ShouldEqual, 20)
 }
 
 func TestStatusIncludesFailureDetails(t *testing.T) {
@@ -382,7 +362,7 @@ func TestStatusIncludesFailureDetails(t *testing.T) {
 	h := &handeye{
 		name:   resource.Name{},
 		logger: logging.NewTestLogger(t),
-		cfg:    &Config{NumPoses: 20},
+		cfg:    &Config{},
 		progress: progressState{
 			state:              "failed",
 			positionsCaptured:  3,
@@ -405,7 +385,7 @@ func TestStatusIncludesResultWhenComplete(t *testing.T) {
 	h := &handeye{
 		name:   resource.Name{},
 		logger: logging.NewTestLogger(t),
-		cfg:    &Config{NumPoses: 20},
+		cfg:    &Config{},
 		progress: progressState{
 			state:              "complete",
 			positionsCaptured:  20,
