@@ -399,7 +399,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	const maxVisTries = 50
 	var prefilterRejections int
-	nextPose := func() spatialmath.Pose {
+	generateFiltered := func() spatialmath.Pose {
 		for i := 0; i < maxVisTries; i++ {
 			p := generatePose(lookAt, bounds, rng, forwardInTarget)
 			if visParams == nil {
@@ -420,7 +420,27 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		return generatePose(lookAt, bounds, rng, forwardInTarget)
 	}
 
-	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
+	pool := &posePool{}
+	for pool.len() < h.cfg.NumPoses*3 {
+		pool.add(generateFiltered())
+	}
+	const poolRefillThreshold = 5
+	var captured []spatialmath.Pose
+	nextPose := func() (spatialmath.Pose, error) {
+		if pool.len() < poolRefillThreshold {
+			for i := 0; i < h.cfg.NumPoses; i++ {
+				pool.add(generateFiltered())
+			}
+		}
+		current, cerr := h.arm.EndPosition(ctx, nil)
+		if cerr != nil {
+			return nil, fmt.Errorf("read arm end position: %w", cerr)
+		}
+		return pool.popBest(current, captured), nil
+	}
+	onCaptured := func(p spatialmath.Pose) { captured = append(captured, p) }
+
+	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose, onCaptured)
 	if visParams != nil {
 		h.logger.Infof("handeye: visibility pre-filter rejected %d candidate poses before planning", prefilterRejections)
 	}
@@ -640,7 +660,7 @@ func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 	return map[string]interface{}{"cancelled": true, "was_running": true}, nil
 }
 
-func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() spatialmath.Pose) ([]map[string]interface{}, error) {
+func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() (spatialmath.Pose, error), onCaptured func(spatialmath.Pose)) ([]map[string]interface{}, error) {
 	fs, err := h.buildFrameSystem(ctx)
 	if err != nil {
 		return nil, err
@@ -682,7 +702,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, err
 		}
 
-		target := nextPose()
+		target, err := nextPose()
+		if err != nil {
+			return nil, fmt.Errorf("handeye: attempt %d next pose: %w", attempt, err)
+		}
 
 		planDur, planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
 		totalPlanDur += planDur
@@ -728,6 +751,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			"reprojection_error_px": reprojErr,
 		})
 		consecutiveFailures = 0
+		onCaptured(actualEndPose)
 		h.mu.Lock()
 		h.progress.positionsCaptured = len(stations)
 		h.mu.Unlock()
