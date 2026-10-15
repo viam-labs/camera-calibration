@@ -157,6 +157,8 @@ const (
 	defaultMaxConsecutiveFailures   = 200
 	defaultSaveSlowPlanThresholdMs  = 1500
 
+	// surface live quality in Status starting at this many captures, solved async behind arm motion
+	minPosesForDisplaySolve = 5
 	// start checking calibration quality after this many captures; stop as soon as it passes
 	minPosesForEarlyStop = 15
 	// hard cap so a stubbornly-failing run gives up instead of spinning forever
@@ -561,6 +563,27 @@ func (s *solveResponse) toResult(parent string) map[string]interface{} {
 	}
 }
 
+// updateDisplayQuality solves on a stations snapshot and writes the result to progress.lastQuality
+// for Status to surface. Best-effort: all errors are swallowed since this is display-only.
+func (h *handeye) updateDisplayQuality(ctx context.Context, stations []map[string]interface{}) {
+	result, err := h.runSolver(ctx, stations)
+	if err != nil {
+		return
+	}
+	quality, err := qualityFromResult(result)
+	if err != nil {
+		return
+	}
+	failedGates, err := h.evaluateQualityGates(quality)
+	if err != nil {
+		return
+	}
+	stampQualityStatus(quality, failedGates)
+	h.mu.Lock()
+	h.progress.lastQuality = quality
+	h.mu.Unlock()
+}
+
 func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface{}) (map[string]interface{}, error) {
 	payload, err := json.Marshal(map[string]interface{}{
 		"stations":         stations,
@@ -783,6 +806,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		if shouldStop(stations) {
 			h.logger.Infof("handeye: quality gates passed at %d captures; stopping sweep early", len(stations))
 			break
+		}
+		// Below the early-stop floor, solve async for live Status display; shouldStop handles solves past the floor.
+		if len(stations) >= minPosesForDisplaySolve && len(stations) < minPosesForEarlyStop {
+			stationsSnapshot := append([]map[string]interface{}(nil), stations...)
+			h.worker.Add(func(solveCtx context.Context) { h.updateDisplayQuality(solveCtx, stationsSnapshot) })
 		}
 	}
 	return stations, nil
