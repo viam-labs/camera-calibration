@@ -134,7 +134,6 @@ Both models take the same attributes.
 | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------- |
 | `arm`                         | Yes      | —       | Name of the arm.                                                              |
 | `pose_tracker`                | Yes      | —       | Name of the pose_tracker (usually the charuco above).                         |
-| `num_poses`                   | No       | 20      | Successful captures required before solving.                                  |
 | `workspace_bounds`            | No       | auto    | Sample region for calibration poses. Auto-derived from the board position if omitted. |
 | `settle_seconds`              | No       | 2.0     | Delay after each arm move before capturing.                                   |
 | `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Keys are joint indices (`"0"`, `"1"`, ...) or joint names; values are `{"Min": ..., "Max": ...}`. Applied to the arm named in `arm`. |
