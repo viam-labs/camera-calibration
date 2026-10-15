@@ -16,6 +16,7 @@ func main() {
 	module.ModularMain(
 		resource.APIModel{API: posetracker.API, Model: charuco.Model},
 		resource.APIModel{API: generic.API, Model: handeye.Model},
+		resource.APIModel{API: generic.API, Model: handeye.ModelEyeToHand},
 		resource.APIModel{API: generic.API, Model: handeye.DeprecatedModel},
 	)
 }

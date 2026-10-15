@@ -83,15 +83,26 @@ func TestGeneratePoseAimsAtTarget(t *testing.T) {
 func TestLookAtRotationArbitraryForwardAimsForwardAtTarget(t *testing.T) {
 	from := r3.Vector{X: 100, Y: 0, Z: 0}
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
-	// Local -Z should point at target: pass {Z: -1} as the forward axis.
+	// forward = local -Z: the "back" of the local frame should point at target.
 	forward := r3.Vector{Z: -1}
 	rm, err := lookAtRotation(from, target, 0, forward)
 	test.That(t, err, test.ShouldBeNil)
 
-	// Apply R to forward via a composed pose; result should equal (target - from).Normalize().
-	expected := target.Sub(from).Normalize()
-	out := spatialmath.Compose(spatialmath.NewPose(r3.Vector{}, rm), spatialmath.NewPoseFromPoint(forward))
-	test.That(t, out.Point().Distance(expected), test.ShouldBeLessThan, 1e-9)
+	expectedWorld := target.Sub(from).Normalize()
+	aa := rm.AxisAngles()
+	// R @ forward in world should equal expectedWorld.
+	actualWorld := applyRotation(rm, forward)
+	test.That(t, actualWorld.Distance(expectedWorld), test.ShouldBeLessThan, 1e-9)
+	_ = aa
+}
+
+func applyRotation(rm *spatialmath.RotationMatrix, v r3.Vector) r3.Vector {
+	// RotationMatrix is a 3x3 row-major; use OrientationVectorRadians or just extract manually.
+	// Easiest: build a pose and transform the vector.
+	p := spatialmath.NewPose(r3.Vector{}, rm)
+	// Transforming an input pose at (v) through p — but p is a rotation only, so result point = R*v.
+	out := spatialmath.Compose(p, spatialmath.NewPoseFromPoint(v))
+	return out.Point()
 }
 
 func TestGeneratePoseRollVaries(t *testing.T) {

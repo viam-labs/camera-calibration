@@ -139,20 +139,34 @@ func TestResolveTargetCameraDerivesFromPoseTracker(t *testing.T) {
 }
 
 func TestFrameFromResult(t *testing.T) {
-	trans, orient, err := frameFromResult(map[string]interface{}{
+	parent, trans, orient, err := frameFromResult(map[string]interface{}{
 		"frame": map[string]interface{}{
+			"parent":      "my-arm",
 			"translation": map[string]interface{}{"x": 1.0},
 			"orientation": map[string]interface{}{"type": "ov_degrees"},
 		},
 	})
 	test.That(t, err, test.ShouldBeNil)
+	test.That(t, parent, test.ShouldEqual, "my-arm")
 	test.That(t, trans, test.ShouldNotBeNil)
 	test.That(t, orient, test.ShouldNotBeNil)
 }
 
-func TestFrameFromResultMissingTranslation(t *testing.T) {
-	_, _, err := frameFromResult(map[string]interface{}{
+func TestFrameFromResultMissingParent(t *testing.T) {
+	_, _, _, err := frameFromResult(map[string]interface{}{
 		"frame": map[string]interface{}{
+			"translation": map[string]interface{}{"x": 1.0},
+			"orientation": map[string]interface{}{"type": "ov_degrees"},
+		},
+	})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "parent")
+}
+
+func TestFrameFromResultMissingTranslation(t *testing.T) {
+	_, _, _, err := frameFromResult(map[string]interface{}{
+		"frame": map[string]interface{}{
+			"parent":      "my-arm",
 			"orientation": map[string]interface{}{"type": "ov_degrees"},
 		},
 	})
@@ -161,8 +175,9 @@ func TestFrameFromResultMissingTranslation(t *testing.T) {
 }
 
 func TestFrameFromResultMissingOrientation(t *testing.T) {
-	_, _, err := frameFromResult(map[string]interface{}{
+	_, _, _, err := frameFromResult(map[string]interface{}{
 		"frame": map[string]interface{}{
+			"parent":      "my-arm",
 			"translation": map[string]interface{}{"x": 1.0},
 		},
 	})
@@ -218,11 +233,12 @@ func TestSetCameraFrameReplacesExistingFrame(t *testing.T) {
 	}
 	newTrans := map[string]interface{}{"x": 10.0, "y": 20.0, "z": 30.0}
 	newOrient := map[string]interface{}{"type": "ov_degrees", "value": map[string]interface{}{"th": 90.0}}
-	err := setCameraFrame(robotConfig, "cam", newTrans, newOrient)
+	err := setCameraFrame(robotConfig, "cam", "my-arm", newTrans, newOrient)
 	test.That(t, err, test.ShouldBeNil)
 
 	cam := robotConfig["components"].([]interface{})[0].(map[string]interface{})
 	frame := cam["frame"].(map[string]interface{})
+	test.That(t, frame["parent"], test.ShouldEqual, "my-arm")
 	test.That(t, frame["translation"], test.ShouldResemble, newTrans)
 	test.That(t, frame["orientation"], test.ShouldResemble, newOrient)
 }
@@ -233,17 +249,18 @@ func TestSetCameraFrameCreatesFrameIfMissing(t *testing.T) {
 	}
 	trans := map[string]interface{}{"x": 1.0}
 	orient := map[string]interface{}{"type": "ov_degrees"}
-	err := setCameraFrame(robotConfig, "cam", trans, orient)
+	err := setCameraFrame(robotConfig, "cam", "my-arm_origin", trans, orient)
 	test.That(t, err, test.ShouldBeNil)
 
 	cam := robotConfig["components"].([]interface{})[0].(map[string]interface{})
 	frame := cam["frame"].(map[string]interface{})
+	test.That(t, frame["parent"], test.ShouldEqual, "my-arm_origin")
 	test.That(t, frame["translation"], test.ShouldResemble, trans)
 	test.That(t, frame["orientation"], test.ShouldResemble, orient)
 }
 
 func TestSetCameraFrameMissingCameraErrors(t *testing.T) {
-	err := setCameraFrame(map[string]interface{}{}, "cam", nil, nil)
+	err := setCameraFrame(map[string]interface{}{}, "cam", "my-arm", nil, nil)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, `component "cam" not found`)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "auto_apply_result: false")
@@ -260,7 +277,7 @@ func TestSetCameraFramePreservesOtherComponentFields(t *testing.T) {
 			},
 		},
 	}
-	err := setCameraFrame(robotConfig, "cam", map[string]interface{}{"x": 1.0}, map[string]interface{}{"type": "ov_degrees"})
+	err := setCameraFrame(robotConfig, "cam", "my-arm", map[string]interface{}{"x": 1.0}, map[string]interface{}{"type": "ov_degrees"})
 	test.That(t, err, test.ShouldBeNil)
 
 	cam := robotConfig["components"].([]interface{})[0].(map[string]interface{})

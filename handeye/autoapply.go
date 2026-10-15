@@ -105,12 +105,12 @@ func (h *handeye) applyToConfig(ctx context.Context, result map[string]interface
 		return fmt.Errorf("resolve target camera: %w", err)
 	}
 
-	translation, orientation, err := frameFromResult(result)
+	parent, translation, orientation, err := frameFromResult(result)
 	if err != nil {
 		return err
 	}
 
-	if err := setCameraFrame(part.RobotConfig, targetCamera, translation, orientation); err != nil {
+	if err := setCameraFrame(part.RobotConfig, targetCamera, parent, translation, orientation); err != nil {
 		return err
 	}
 
@@ -128,20 +128,24 @@ func (h *handeye) resolveTargetCamera(robotConfig map[string]interface{}) (strin
 	return deriveTargetCameraFromPoseTracker(robotConfig, h.cfg.PoseTracker)
 }
 
-func frameFromResult(result map[string]interface{}) (translation, orientation map[string]interface{}, err error) {
+func frameFromResult(result map[string]interface{}) (parent string, translation, orientation map[string]interface{}, err error) {
 	frame, ok := result["frame"].(map[string]interface{})
 	if !ok {
-		return nil, nil, errors.New("solve result missing frame")
+		return "", nil, nil, errors.New("solve result missing frame")
+	}
+	parent, ok = frame["parent"].(string)
+	if !ok || parent == "" {
+		return "", nil, nil, errors.New("solve result missing frame.parent")
 	}
 	translation, ok = frame["translation"].(map[string]interface{})
 	if !ok {
-		return nil, nil, errors.New("solve result missing frame.translation")
+		return "", nil, nil, errors.New("solve result missing frame.translation")
 	}
 	orientation, ok = frame["orientation"].(map[string]interface{})
 	if !ok {
-		return nil, nil, errors.New("solve result missing frame.orientation")
+		return "", nil, nil, errors.New("solve result missing frame.orientation")
 	}
-	return translation, orientation, nil
+	return parent, translation, orientation, nil
 }
 
 func qualityFromResult(result map[string]interface{}) (map[string]interface{}, error) {
@@ -168,7 +172,7 @@ func deriveTargetCameraFromPoseTracker(robotConfig map[string]interface{}, poseT
 	return camera, nil
 }
 
-func setCameraFrame(robotConfig map[string]interface{}, cameraName string, translation, orientation map[string]interface{}) error {
+func setCameraFrame(robotConfig map[string]interface{}, cameraName, parent string, translation, orientation map[string]interface{}) error {
 	cam, err := findComponent(robotConfig, cameraName)
 	if err != nil {
 		return fmt.Errorf("%w — if the camera lives inside a fragment, set auto_apply_result: false and apply the returned frame manually", err)
@@ -178,6 +182,7 @@ func setCameraFrame(robotConfig map[string]interface{}, cameraName string, trans
 		frame = map[string]interface{}{}
 		cam["frame"] = frame
 	}
+	frame["parent"] = parent
 	frame["translation"] = translation
 	frame["orientation"] = orientation
 	return nil
