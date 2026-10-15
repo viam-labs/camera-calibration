@@ -393,7 +393,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	// Pre-check context: which pose is fixed, which moves per candidate.
 	var fixedBoardInWorld, fixedCameraInWorld spatialmath.Pose
 	if h.isEyeToHand() {
-		fixedCameraInWorld = spatialmath.NewPoseFromPoint(seedRes.LookAtPoint)
+		fixedCameraInWorld = seedRes.CameraInWorldEst
 	} else {
 		fixedBoardInWorld = seedRes.SampleCenter
 	}
@@ -849,9 +849,10 @@ type seedResult struct {
 	BoardInCamera spatialmath.Pose
 	// SampleCenter: bounds anchor. LookAtPoint: world point positions aim at.
 	// ForwardInTarget: direction in goal-frame local coords that aims at LookAtPoint.
-	SampleCenter    spatialmath.Pose
-	LookAtPoint     r3.Vector
-	ForwardInTarget r3.Vector
+	SampleCenter     spatialmath.Pose
+	LookAtPoint      r3.Vector
+	ForwardInTarget  r3.Vector
+	CameraInWorldEst spatialmath.Pose // eye-to-hand only; nil for eye-in-hand
 }
 
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
@@ -883,10 +884,11 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 
 	var sampleCenter spatialmath.Pose
 	var lookAtPoint r3.Vector
+	var cameraInWorldEst spatialmath.Pose
 	forwardInTarget := r3.Vector{Z: 1}
 	if h.isEyeToHand() {
 		sampleCenter = armEndInWorld.Pose()
-		cameraInWorldEst := spatialmath.Compose(armEndInWorld.Pose(), spatialmath.PoseInverse(boardInCamera))
+		cameraInWorldEst = spatialmath.Compose(armEndInWorld.Pose(), spatialmath.PoseInverse(boardInCamera))
 		lookAtPoint = cameraInWorldEst.Point()
 		cameraInBoard := spatialmath.PoseInverse(boardInCamera).Point()
 		if n := cameraInBoard.Norm(); n > 1e-9 {
@@ -903,12 +905,13 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	}
 
 	return &seedResult{
-		ArmJoints:       jointsToFloats(joints),
-		ArmEndPose:      endPose,
-		BoardInCamera:   boardInCamera,
-		SampleCenter:    sampleCenter,
-		LookAtPoint:     lookAtPoint,
-		ForwardInTarget: forwardInTarget,
+		ArmJoints:        jointsToFloats(joints),
+		ArmEndPose:       endPose,
+		BoardInCamera:    boardInCamera,
+		SampleCenter:     sampleCenter,
+		LookAtPoint:      lookAtPoint,
+		ForwardInTarget:  forwardInTarget,
+		CameraInWorldEst: cameraInWorldEst,
 	}, nil
 }
 
