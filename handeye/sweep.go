@@ -38,15 +38,14 @@ func deriveDefaultBounds(boardCenter r3.Vector) WorkspaceBounds {
 	}
 }
 
-// perpBasis returns an orthonormal pair spanning the plane perpendicular to axis.
-func perpBasis(axis r3.Vector) (a, b r3.Vector) {
-	ref := r3.Vector{Z: 1}
-	if math.Abs(axis.Dot(ref)) > 0.99 {
-		ref = r3.Vector{X: 1}
+// Symmetric variant for eye-to-hand: the arm wiggles the held target around
+// its current pose rather than hovering over a world-fixed board.
+func deriveDefaultBoundsSymmetric(center r3.Vector) WorkspaceBounds {
+	return WorkspaceBounds{
+		X: AxisBounds{Min: center.X - 150, Max: center.X + 150},
+		Y: AxisBounds{Min: center.Y - 150, Max: center.Y + 150},
+		Z: AxisBounds{Min: center.Z - 150, Max: center.Z + 150},
 	}
-	a = ref.Sub(axis.Mul(ref.Dot(axis))).Normalize()
-	b = axis.Cross(a)
-	return a, b
 }
 
 // lookAtRotation builds a rotation whose local `forwardLocal` axis points from
@@ -57,16 +56,38 @@ func lookAtRotation(from, target r3.Vector, rollRad float64, forwardLocal r3.Vec
 		return nil, fmt.Errorf("look-at position coincides with target")
 	}
 	desired = desired.Normalize()
-	fw := forwardLocal.Normalize()
 
-	aLocal, bLocal := perpBasis(fw)
-	aWorld, bWorld := perpBasis(desired)
+	fw := forwardLocal
+	if fw.Norm() < 1e-9 {
+		fw = r3.Vector{Z: 1}
+	} else {
+		fw = fw.Normalize()
+	}
 
+	// Orthonormal basis in local frame around fw: aLocal is the component of
+	// local +x perpendicular to fw (fall back to +y if +x is parallel to fw).
+	localRef := r3.Vector{X: 1}
+	if math.Abs(fw.X) > 0.99 {
+		localRef = r3.Vector{Y: 1}
+	}
+	aLocal := localRef.Sub(fw.Mul(localRef.Dot(fw))).Normalize()
+	bLocal := fw.Cross(aLocal)
+
+	// Orthonormal basis in world around desired.
+	worldUp := r3.Vector{Z: 1}
+	if math.Abs(desired.Dot(worldUp)) > 0.99 {
+		worldUp = r3.Vector{X: 1}
+	}
+	aWorld := worldUp.Cross(desired).Normalize()
+	bWorld := desired.Cross(aWorld)
+
+	// Roll about desired.
 	c, s := math.Cos(rollRad), math.Sin(rollRad)
 	aRolled := aWorld.Mul(c).Add(bWorld.Mul(s))
 	bRolled := aWorld.Mul(-s).Add(bWorld.Mul(c))
 
-	// Columns are the images of {aLocal, bLocal, fw} under the rotation.
+	// R maps local {aLocal, bLocal, fw} to world {aRolled, bRolled, desired}.
+	// R[i][j] = aRolled[i]*aLocal[j] + bRolled[i]*bLocal[j] + desired[i]*fw[j]
 	return spatialmath.NewRotationMatrix([]float64{
 		aRolled.X*aLocal.X + bRolled.X*bLocal.X + desired.X*fw.X,
 		aRolled.X*aLocal.Y + bRolled.X*bLocal.Y + desired.X*fw.Y,

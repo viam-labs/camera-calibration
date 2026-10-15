@@ -1,32 +1,20 @@
 # camera-calibration
 
-**Hand-eye calibration** for arm-mounted cameras on Viam machines.
-
-The goal is fast, good-enough calibration. If a few millimeters of error is fine for your use case, the [Quick Start](#quick-start) gets you there in ~5 minutes. If you need sub-mm precision, you'll need to pay more attention to the quality of the results.
+Frame calibration for cameras via arms. This module's purpose is to help you calibrate as fast as possible.
 
 ## How It Works
 
-This module figures out where your camera sits relative to the arm's tool flange by moving the arm to ~20 positions, photographing a board from each one, and solving for the transform. On success, it **writes the calibrated frame back to your camera's config automatically**.
-
-## Prerequisites
-
-- Arm component configured on the machine.
-- Camera component configured, with its `frame.parent` set to the arm's name. Translation and orientation don't have to be correct - that's what this module fixes - but the parent must be the arm since the camera physically moves with it.
-- Any obstacles the arm might hit during the sweep modeled as components with geometry.
+The module figures out where your camera sits relative to the arm by moving the arm to ~20 positions, photographing a board from each one, and solving for the transform. On success, it writes the calibrated frame back to your camera's config automatically.
 
 ## Quick Start
 
 ### Step 1: Get a calibration board
 
-We suggest a ChArUco board. The specific board we validate against: [Calib.io ChArUco 300x200x6 mm, Coarse pattern, Aluminium/LDPE](https://calib.io/products/charuco-targets?variant=9400454807599). Smaller boards from the same line have performed worse in our testing.
-
-Only ChArUco targets are supported today. Other patterns (checkerboard, circle, Kalibr, Halcon) may work but we haven't validated them thoroughly enough to include in this streamlined module. If you have a use case requiring a different target, open an issue.
+We suggest a ChArUco board. The specific board we validate against: [Calib.io ChArUco 300x200x6 mm, Coarse pattern, Aluminium/LDPE](https://calib.io/products/charuco-targets?variant=9400454807599).
 
 ![Recommended ChArUco board](assets/charuco-board.png)
 
 ### Step 2: Add the module
-
-In the Viam app, add `viam:camera-calibration` to your machine.
 
 ```json
 {
@@ -39,7 +27,7 @@ In the Viam app, add `viam:camera-calibration` to your machine.
 
 ### Step 3: Configure the pose_tracker
 
-The values below match the recommended board from Step 1. **You must replace `camera` with your camera's name.** If you're using a different board, also replace `squares_x`, `squares_y`, `square_length_mm`, and `marker_length_mm` with values from your board's spec sheet.
+Values below match the recommended board from Step 1. **Replace `camera` with your camera's name.** For a different board, replace `squares_x`, `squares_y`, `square_length_mm`, and `marker_length_mm` with values from your board's spec sheet.
 
 ```json
 {
@@ -59,7 +47,11 @@ The values below match the recommended board from Step 1. **You must replace `ca
 
 ### Step 4: Configure the calibration service
 
-The `input_range_override` values below are xArm 6-specific — replace with limits appropriate to your arm.
+Pick the one that matches your physical setup.
+
+#### Camera mounted on arm
+
+The camera's `frame.parent` should be the arm.
 
 ```json
 {
@@ -68,28 +60,32 @@ The `input_range_override` values below are xArm 6-specific — replace with lim
   "model": "viam:camera-calibration:eye_in_hand",
   "attributes": {
     "arm": "your-arm-name",
-    "pose_tracker": "calibration-charuco",
-    "input_range_override": {
-      "0": {"Min": -1.5708, "Max": 1.5708},
-      "1": {"Min": -1.5708, "Max": 0.5236},
-      "2": {"Min": -2.0944, "Max": 0.5236},
-      "3": {"Min": -1.5708, "Max": 1.5708},
-      "4": {"Min": -1.0472, "Max": 1.5708},
-      "5": {"Min": -3.1416, "Max": 3.1416}
-    }
+    "pose_tracker": "calibration-charuco"
   }
 }
 ```
 
-Everything else defaults.
+#### Camera not mounted on arm
 
-**Strongly recommended (but optional)**: tune `input_range_override` to your workspace before running. Without limits appropriate to your rig, the sweep can whip cables around and damage them. The values above are conservative starting points for an xArm 6.
+The camera's `frame.parent` should be `world` (or `<arm>_origin`), not the arm.
 
-**Note**: if you have joint limits set on the built-in motion service, this module does NOT read them. Duplicate them here.
+```json
+{
+  "name": "calibration-handeye",
+  "api": "rdk:service:generic",
+  "model": "viam:camera-calibration:eye_to_hand",
+  "attributes": {
+    "arm": "your-arm-name",
+    "pose_tracker": "calibration-charuco"
+  }
+}
+```
+
+**Strongly recommended**: set `input_range_override` to tighten joint limits to the subset your rig can safely sweep. Without it the arm may whip cables or hit things. See the reference table below.
 
 ### Step 5: Position the arm
 
-Manually move the arm so the camera has a clean, close view of the whole board. Board should fill 40-70% of the frame, all corners visible. This becomes the starting pose - the arm returns here after calibrating.
+Manually move the arm so the camera has a clean, close view of the whole board. Board should fill 40-70% of the frame, all corners visible. This becomes the starting pose — the arm returns here after calibrating.
 
 ### Step 6: Run calibrate
 
@@ -103,9 +99,7 @@ From the app's Control tab, on `calibration-handeye`, send:
 
 ![Calibrate via DoCommand in the Viam app](assets/calibrate-do-command.png)
 
-Takes a few minutes. 
-
-You can call `Status` on `calibration-handeye` to see progress in real-time.
+Takes a few minutes. Call `Status` on `calibration-handeye` to watch progress.
 
 ![Status panel during calibration](assets/calibrate-status.png)
 
@@ -116,12 +110,12 @@ On success, **your camera's `frame` block in the machine config is updated autom
 If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The result is still returned; inspect the `quality` block to decide whether to apply the returned `frame` manually or re-run.
 
 ## Reference
-### `viam:camera-calibration:charuco`
 
+### `viam:camera-calibration:charuco`
 
 | Field              | Required | Default         | Description                                                                              |
 | ------------------ | -------- | --------------- | ---------------------------------------------------------------------------------------- |
-| `camera`           | Yes      | —               | Name of the arm-mounted camera to detect on.                                             |
+| `camera`           | Yes      | —               | Name of the camera to detect on.                                                         |
 | `dictionary`       | Yes      | —               | ArUco dictionary. `DICT_{4,5,6,7}X{4,5,6,7}_{50,100,250,1000}` or `DICT_ARUCO_ORIGINAL`. |
 | `squares_x`        | Yes      | —               | Board width in squares.                                                                  |
 | `squares_y`        | Yes      | —               | Board height in squares.                                                                 |
@@ -132,8 +126,9 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 
 > **On `distortion`**: for cameras that undistort on-device (e.g. Zivid, Ensenso, Orbbec), set to `[0, 0, 0, 0, 0]`. For cameras that publish real distortion coefficients (e.g. Realsense), leave unset.
 
-### `viam:camera-calibration:eye_in_hand`
+### `viam:camera-calibration:eye_in_hand` and `viam:camera-calibration:eye_to_hand`
 
+Both models take the same attributes.
 
 | Field                         | Required | Default | Description                                                                   |
 | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------- |
@@ -149,12 +144,9 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 | `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `min_pose_diversity_deg`      | No       | 30.0    | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
 | `max_reprojection_error_px`   | No       | 2.0     | Skip auto-apply if the mean per-station board-corner reprojection error exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
-| `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. Raise if your rig legitimately needs many attempts per capture; lower to fail faster. |
-| `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. Default is well above typical successful plans (~20ms), so it only fires for genuinely unusual plans. |
-| `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Noisy — intended for exhaustive offline analysis. Supersedes `save_slow_plan_threshold_ms` (no duplicates). |
-
-
-
+| `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. |
+| `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. |
+| `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Supersedes `save_slow_plan_threshold_ms`. |
 
 ### DoCommands
 

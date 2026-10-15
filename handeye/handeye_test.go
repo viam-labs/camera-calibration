@@ -137,6 +137,7 @@ func TestSeedReturnsExpectedShape(t *testing.T) {
 	h := &handeye{
 		name:      resource.Name{},
 		logger:    logging.NewTestLogger(t),
+		cfg:       &Config{},
 		arm:       mockArm(),
 		tracker:   mockTracker(),
 		fsService: mockFsService(),
@@ -146,7 +147,7 @@ func TestSeedReturnsExpectedShape(t *testing.T) {
 	test.That(t, resp.ArmJoints, test.ShouldResemble, []float64{0.1, 0.2, 0.3})
 	test.That(t, resp.ArmEndPose, test.ShouldNotBeNil)
 	test.That(t, resp.BoardInCamera, test.ShouldNotBeNil)
-	test.That(t, resp.BoardInWorld, test.ShouldNotBeNil)
+	test.That(t, resp.SampleCenter, test.ShouldNotBeNil)
 }
 
 func TestSeedBoardNotDetectedErrors(t *testing.T) {
@@ -510,8 +511,8 @@ func TestApplyJointLimitsUnknownJointErrors(t *testing.T) {
 
 func TestSolveResponseToResult(t *testing.T) {
 	resp := &solveResponse{}
-	resp.CameraInGripperMM.Translation = []float64{10.0, 20.0, 30.0}
-	resp.CameraInGripperMM.Rvec = []float64{0.0, 0.0, 0.0}
+	resp.CameraInParentMM.Translation = []float64{10.0, 20.0, 30.0}
+	resp.CameraInParentMM.Rvec = []float64{0.0, 0.0, 0.0}
 	resp.Residuals.TranslationMM = 0.5
 	resp.Residuals.RotationDeg = 0.1
 	resp.Residuals.PoseDiversityDeg = 90.0
