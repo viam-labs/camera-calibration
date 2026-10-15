@@ -50,6 +50,9 @@ func TestConfigValidate(t *testing.T) {
 		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be >= 0 (0 uses the default), got -1"},
 		{name: "max_reprojection_error_px negative", mutate: func(c *Config) { c.MaxReprojectionErrorPx = -1 }, wantErr: "max_reprojection_error_px must be >= 0 (0 uses the default), got -1"},
 		{name: "max_consecutive_failures negative", mutate: func(c *Config) { c.MaxConsecutiveFailures = -1 }, wantErr: "max_consecutive_failures must be >= 0 (0 uses the default), got -1"},
+		{name: "calibration_type unknown rejected", mutate: func(c *Config) { c.CalibrationType = "bogus" }, wantErr: `calibration_type must be "eye_in_hand" or "eye_to_hand", got "bogus"`},
+		{name: "eye_to_hand validates ok", mutate: func(c *Config) { c.CalibrationType = CalibrationTypeEyeToHand }, wantErr: ""},
+		{name: "eye_in_hand explicit validates ok", mutate: func(c *Config) { c.CalibrationType = CalibrationTypeEyeInHand }, wantErr: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,6 +140,7 @@ func TestSeedReturnsExpectedShape(t *testing.T) {
 	h := &handeye{
 		name:      resource.Name{},
 		logger:    logging.NewTestLogger(t),
+		cfg:       &Config{},
 		arm:       mockArm(),
 		tracker:   mockTracker(),
 		fsService: mockFsService(),
@@ -146,7 +150,7 @@ func TestSeedReturnsExpectedShape(t *testing.T) {
 	test.That(t, resp.ArmJoints, test.ShouldResemble, []float64{0.1, 0.2, 0.3})
 	test.That(t, resp.ArmEndPose, test.ShouldNotBeNil)
 	test.That(t, resp.BoardInCamera, test.ShouldNotBeNil)
-	test.That(t, resp.BoardInWorld, test.ShouldNotBeNil)
+	test.That(t, resp.SampleCenter, test.ShouldNotBeNil)
 }
 
 func TestSeedBoardNotDetectedErrors(t *testing.T) {
@@ -510,8 +514,8 @@ func TestApplyJointLimitsUnknownJointErrors(t *testing.T) {
 
 func TestSolveResponseToResult(t *testing.T) {
 	resp := &solveResponse{}
-	resp.CameraInGripperMM.Translation = []float64{10.0, 20.0, 30.0}
-	resp.CameraInGripperMM.Rvec = []float64{0.0, 0.0, 0.0}
+	resp.CameraInParentMM.Translation = []float64{10.0, 20.0, 30.0}
+	resp.CameraInParentMM.Rvec = []float64{0.0, 0.0, 0.0}
 	resp.Residuals.TranslationMM = 0.5
 	resp.Residuals.RotationDeg = 0.1
 	resp.Residuals.PoseDiversityDeg = 90.0

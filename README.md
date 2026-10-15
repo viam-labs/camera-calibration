@@ -1,6 +1,6 @@
 # camera-calibration
 
-**Hand-eye calibration** for arm-mounted cameras on Viam machines.
+**Hand-eye calibration** for Viam machines. Supports **eye-in-hand** (camera rides the arm, board is world-fixed — the default) and **eye-to-hand** (camera is static, board is bolted to the arm).
 
 The goal is fast, good-enough calibration. If a few millimeters of error is fine for your use case, the [Quick Start](#quick-start) gets you there in ~5 minutes. If you need sub-mm precision, you'll need to pay more attention to the quality of the results.
 
@@ -115,6 +115,30 @@ On success, **your camera's `frame` block in the machine config is updated autom
 
 If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The result is still returned; inspect the `quality` block to decide whether to apply the returned `frame` manually or re-run.
 
+## Eye-to-hand
+
+Eye-to-hand is the inverse arrangement: the camera is bolted to the world, the ChArUco board is bolted to the arm. The solve returns the camera's pose in the arm's base frame (parent `<arm>_origin`), which is what gets written to the static camera's `frame` config.
+
+Deltas from the Quick Start above:
+
+1. **Static camera**: configure your camera as a normal camera component with `frame.parent` set to `world` (or `<arm>_origin`), not the arm. The pose_tracker's `camera` attribute still points at it.
+2. **Handeye service config**: set `calibration_type: "eye_to_hand"`. If you want the planner to avoid colliding the physical board with other things, add it as an obstacle component parented to the arm (same pattern as any other arm-held obstacle).
+
+```json
+{
+  "name": "calibration-handeye",
+  "api": "rdk:service:generic",
+  "model": "viam:camera-calibration:handeye",
+  "attributes": {
+    "arm": "your-arm-name",
+    "pose_tracker": "calibration-charuco",
+    "calibration_type": "eye_to_hand"
+  }
+}
+```
+
+Everything else (quality gates, auto-apply, `cancel`, `Status`) works the same. The returned `frame` has `parent: "<arm>_origin"` and auto-apply writes it to the static camera's config.
+
 ## Reference
 ### `viam:camera-calibration:charuco`
 
@@ -139,6 +163,7 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------- |
 | `arm`                         | Yes      | —       | Name of the arm.                                                              |
 | `pose_tracker`                | Yes      | —       | Name of the pose_tracker (usually the charuco above).                         |
+| `calibration_type`            | No       | `eye_in_hand` | `eye_in_hand` (camera on arm) or `eye_to_hand` (static camera, board on arm). |
 | `num_poses`                   | No       | 20      | Successful captures required before solving.                                  |
 | `workspace_bounds`            | No       | auto    | Sample region for calibration poses. Auto-derived from the board position if omitted. |
 | `settle_seconds`              | No       | 2.0     | Delay after each arm move before capturing.                                   |

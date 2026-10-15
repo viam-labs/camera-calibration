@@ -95,3 +95,61 @@ func TestCheckCameraFrameParentRejectsIntermediateFrame(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, `frame.parent="custom-bracket"`)
 }
+
+func eyeToHandCfg() *Config {
+	return &Config{Arm: "my-arm", PoseTracker: "pt", CalibrationType: CalibrationTypeEyeToHand}
+}
+
+func TestCheckCameraFrameParentEyeToHandRejectsArmParent(t *testing.T) {
+	h := &handeye{cfg: eyeToHandCfg()}
+	robotConfig := map[string]interface{}{
+		"components": []interface{}{
+			map[string]interface{}{
+				"name":       "pt",
+				"attributes": map[string]interface{}{"camera": "cam"},
+			},
+			map[string]interface{}{
+				"name":  "cam",
+				"frame": map[string]interface{}{"parent": "my-arm"},
+			},
+		},
+	}
+	err := h.checkCameraFrameParent(robotConfig)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "eye-to-hand")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "my-arm_origin")
+}
+
+func TestCheckCameraFrameParentEyeToHandAcceptsWorld(t *testing.T) {
+	h := &handeye{cfg: eyeToHandCfg()}
+	robotConfig := map[string]interface{}{
+		"components": []interface{}{
+			map[string]interface{}{
+				"name":       "pt",
+				"attributes": map[string]interface{}{"camera": "cam"},
+			},
+			map[string]interface{}{
+				"name":  "cam",
+				"frame": map[string]interface{}{"parent": "world"},
+			},
+		},
+	}
+	test.That(t, h.checkCameraFrameParent(robotConfig), test.ShouldBeNil)
+}
+
+func TestCheckCameraFrameParentEyeToHandAcceptsArmOrigin(t *testing.T) {
+	h := &handeye{cfg: eyeToHandCfg()}
+	robotConfig := map[string]interface{}{
+		"components": []interface{}{
+			map[string]interface{}{
+				"name":       "pt",
+				"attributes": map[string]interface{}{"camera": "cam"},
+			},
+			map[string]interface{}{
+				"name":  "cam",
+				"frame": map[string]interface{}{"parent": "my-arm_origin"},
+			},
+		},
+	}
+	test.That(t, h.checkCameraFrameParent(robotConfig), test.ShouldBeNil)
+}

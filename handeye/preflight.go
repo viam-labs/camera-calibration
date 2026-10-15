@@ -39,6 +39,14 @@ func (h *handeye) checkCameraFrameParent(robotConfig map[string]interface{}) err
 	}
 	frame, _ := cam["frame"].(map[string]interface{})
 	parent, _ := frame["parent"].(string)
+
+	if h.cfg.isEyeToHand() {
+		if parent == h.cfg.Arm {
+			return fmt.Errorf("camera %q has frame.parent=%q (the arm), but eye-to-hand calibration requires a static camera; set its frame.parent to %q or 'world' before running calibrate", targetCamera, parent, h.cfg.Arm+"_origin")
+		}
+		return nil
+	}
+
 	if parent == "" {
 		return fmt.Errorf("camera %q has no frame.parent set — set it to %q (the arm), so the calibrated transform is meaningful in the frame system", targetCamera, h.cfg.Arm)
 	}

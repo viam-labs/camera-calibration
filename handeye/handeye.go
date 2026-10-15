@@ -1,7 +1,6 @@
-// Package handeye implements a Viam service that calibrates a camera
-// mounted on a robotic arm (eye-in-hand). It consumes a pose_tracker,
-// sweeps the arm through generated poses, and solves for the
-// camera-in-gripper transform.
+// Package handeye implements a Viam service for hand-eye calibration.
+// Supports eye-in-hand (camera on arm, board in world) and eye-to-hand
+// (camera static, board on arm).
 package handeye
 
 import (
@@ -39,6 +38,11 @@ import (
 // Model is the handeye calibration service.
 var Model = resource.NewModel("viam", "camera-calibration", "handeye")
 
+const (
+	CalibrationTypeEyeInHand = "eye_in_hand"
+	CalibrationTypeEyeToHand = "eye_to_hand"
+)
+
 func init() {
 	resource.RegisterService(generic.API, Model,
 		resource.Registration[resource.Resource, *Config]{
@@ -51,6 +55,7 @@ func init() {
 type Config struct {
 	Arm                      string                          `json:"arm"`
 	PoseTracker              string                          `json:"pose_tracker"`
+	CalibrationType          string                          `json:"calibration_type,omitempty"`
 	NumPoses                 int                             `json:"num_poses"`
 	WorkspaceBounds          WorkspaceBounds                 `json:"workspace_bounds"`
 	SettleSeconds            float64                         `json:"settle_seconds"`
@@ -70,6 +75,17 @@ func (cfg *Config) autoApplyEnabled() bool {
 	return cfg.AutoApplyResult == nil || *cfg.AutoApplyResult
 }
 
+func (cfg *Config) isEyeToHand() bool {
+	return cfg.CalibrationType == CalibrationTypeEyeToHand
+}
+
+func (cfg *Config) calibrationTypeOrDefault() string {
+	if cfg.CalibrationType == "" {
+		return CalibrationTypeEyeInHand
+	}
+	return cfg.CalibrationType
+}
+
 // Validate returns implicit dependencies and any config errors.
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
@@ -77,6 +93,11 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.PoseTracker == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "pose_tracker")
+	}
+	switch cfg.CalibrationType {
+	case "", CalibrationTypeEyeInHand, CalibrationTypeEyeToHand:
+	default:
+		return nil, nil, fmt.Errorf("calibration_type must be %q or %q, got %q", CalibrationTypeEyeInHand, CalibrationTypeEyeToHand, cfg.CalibrationType)
 	}
 	if cfg.NumPoses != 0 && cfg.NumPoses < 3 {
 		return nil, nil, fmt.Errorf("num_poses must be >= 3 (or 0 for the default), got %d", cfg.NumPoses)
@@ -320,10 +341,11 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		fail(fmt.Errorf("handeye: seed: %w", err))
 		return
 	}
-	seedCenter := seedRes.BoardInWorld.Point()
-	seedRvec := seedRes.BoardInWorld.Orientation().AxisAngles().ToR3()
-	h.logger.Infof("handeye: seed board_in_world center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f)",
-		seedCenter.X, seedCenter.Y, seedCenter.Z, seedRvec.X, seedRvec.Y, seedRvec.Z)
+	centerPt := seedRes.SampleCenter.Point()
+	centerRvec := seedRes.SampleCenter.Orientation().AxisAngles().ToR3()
+	h.logger.Infof("handeye: seed sample_center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f) look_at=(%.1f, %.1f, %.1f)",
+		centerPt.X, centerPt.Y, centerPt.Z, centerRvec.X, centerRvec.Y, centerRvec.Z,
+		seedRes.LookAtPoint.X, seedRes.LookAtPoint.Y, seedRes.LookAtPoint.Z)
 
 	if h.cfg.NumPoses < 3 {
 		fail(fmt.Errorf("handeye: num_poses must be >= 3, got %d", h.cfg.NumPoses))
@@ -332,15 +354,21 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	bounds := h.cfg.WorkspaceBounds
 	if bounds.IsZero() {
-		bounds = deriveDefaultBounds(seedCenter)
+		if h.cfg.isEyeToHand() {
+			bounds = deriveDefaultBoundsSymmetric(centerPt)
+		} else {
+			bounds = deriveDefaultBounds(centerPt)
+		}
 		h.logger.Infof("handeye: auto-derived workspace_bounds x=[%.1f, %.1f] y=[%.1f, %.1f] z=[%.1f, %.1f]",
 			bounds.X.Min, bounds.X.Max, bounds.Y.Min, bounds.Y.Max, bounds.Z.Min, bounds.Z.Max)
 	}
 
 	//nolint:gosec // sampling for pose generation, not crypto
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	lookAt := seedRes.LookAtPoint
+	forwardInTarget := seedRes.ForwardInTarget
 	nextPose := func() spatialmath.Pose {
-		return generatePose(seedCenter, bounds, rng)
+		return generatePose(lookAt, bounds, rng, forwardInTarget)
 	}
 
 	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
@@ -395,10 +423,10 @@ func (h *handeye) runCalibration(ctx context.Context) {
 }
 
 type solveResponse struct {
-	CameraInGripperMM struct {
+	CameraInParentMM struct {
 		Translation []float64 `json:"translation"`
 		Rvec        []float64 `json:"rvec"`
-	} `json:"camera_in_gripper_mm"`
+	} `json:"camera_in_parent_mm"`
 	Residuals struct {
 		TranslationMM             float64 `json:"translation_mm"`
 		RotationDeg               float64 `json:"rotation_deg"`
@@ -408,13 +436,13 @@ type solveResponse struct {
 	} `json:"residuals"`
 }
 
-func (s *solveResponse) toResult(armName string) map[string]interface{} {
-	t := s.CameraInGripperMM.Translation
-	rvec := r3.Vector{X: s.CameraInGripperMM.Rvec[0], Y: s.CameraInGripperMM.Rvec[1], Z: s.CameraInGripperMM.Rvec[2]}
+func (s *solveResponse) toResult(parent string) map[string]interface{} {
+	t := s.CameraInParentMM.Translation
+	rvec := r3.Vector{X: s.CameraInParentMM.Rvec[0], Y: s.CameraInParentMM.Rvec[1], Z: s.CameraInParentMM.Rvec[2]}
 	ovd := spatialmath.R3ToR4(rvec).OrientationVectorDegrees()
 	return map[string]interface{}{
 		"frame": map[string]interface{}{
-			"parent":      armName,
+			"parent":      parent,
 			"translation": map[string]interface{}{"x": t[0], "y": t[1], "z": t[2]},
 			"orientation": map[string]interface{}{
 				"type": "ov_degrees",
@@ -438,8 +466,9 @@ func (s *solveResponse) toResult(armName string) map[string]interface{} {
 
 func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface{}) (map[string]interface{}, error) {
 	payload, err := json.Marshal(map[string]interface{}{
-		"stations": stations,
-		"method":   "tsai",
+		"stations":         stations,
+		"method":           "tsai",
+		"calibration_type": h.cfg.calibrationTypeOrDefault(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("handeye: marshal solve input: %w", err)
@@ -467,10 +496,17 @@ func (h *handeye) runSolver(ctx context.Context, stations []map[string]interface
 	if err := json.Unmarshal(stdout, &resp); err != nil {
 		return nil, fmt.Errorf("handeye: parse solve output: %w", err)
 	}
-	if len(resp.CameraInGripperMM.Translation) != 3 || len(resp.CameraInGripperMM.Rvec) != 3 {
+	if len(resp.CameraInParentMM.Translation) != 3 || len(resp.CameraInParentMM.Rvec) != 3 {
 		return nil, fmt.Errorf("handeye: solve output missing translation or rvec")
 	}
-	return resp.toResult(h.cfg.Arm), nil
+	return resp.toResult(h.resultParent()), nil
+}
+
+func (h *handeye) resultParent() string {
+	if h.cfg.isEyeToHand() {
+		return h.cfg.Arm + "_origin"
+	}
+	return h.cfg.Arm
 }
 
 func (h *handeye) checkStartingJointsInBounds(ctx context.Context, joints []referenceframe.Input) error {
@@ -563,6 +599,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
 	attempt := 0
 	consecutiveFailures := 0
+	var totalPlanDur time.Duration
+	defer func() {
+		h.logger.Infof("handeye: sweep spent %s with the arm stationary while planning (%d captured / %d attempted)",
+			totalPlanDur.Round(time.Millisecond), len(stations), attempt)
+	}()
 
 	// TODO: tailor the sweep-failure error to the dominant failure mode (unreachable → widen input_range_override; board-not-detected → camera setup).
 	recordFailure := func(reason string) error {
@@ -591,7 +632,8 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 
 		target := nextPose()
 
-		planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
+		planDur, planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
+		totalPlanDur += planDur
 		if execErr != nil {
 			return nil, fmt.Errorf("handeye: attempt %d execute failed, halting sweep: %w", attempt, execErr)
 		}
@@ -654,11 +696,11 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 	return fs, nil
 }
 
-func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planErr, execErr error) {
+func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planDur time.Duration, planErr, execErr error) {
 	armName := h.arm.Name().Name
 	fsInputs, err := h.fsService.CurrentInputs(ctx)
 	if err != nil {
-		return fmt.Errorf("get frame system inputs: %w", err), nil
+		return 0, fmt.Errorf("get frame system inputs: %w", err), nil
 	}
 
 	startState := armplanning.NewPlanState(nil, fsInputs)
@@ -673,9 +715,9 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	}
 	planStart := time.Now()
 	plan, _, err := armplanning.PlanMotion(ctx, h.logger, req)
-	planDur := time.Since(planStart)
+	planDur = time.Since(planStart)
 	if err != nil {
-		return fmt.Errorf("plan motion: %w", err), nil
+		return planDur, fmt.Errorf("plan motion: %w", err), nil
 	}
 	h.maybeSavePlanRequest(ctx, passID, req, planDur)
 
@@ -683,16 +725,16 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	for _, fsInputs := range plan.Trajectory() {
 		armInputs, err := fsInputs.GetFrameInputs(fs.Frame(armName))
 		if err != nil {
-			return fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
+			return planDur, fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
 		}
 		trajectory = append(trajectory, armInputs)
 	}
 
 	if err := h.arm.MoveThroughJointPositions(ctx, trajectory, nil, nil); err != nil {
 		h.saveFailureArtifacts(ctx, passID, req, trajectory, planDur)
-		return nil, fmt.Errorf("execute trajectory: %w", err)
+		return planDur, nil, fmt.Errorf("execute trajectory: %w", err)
 	}
-	return nil, nil
+	return planDur, nil, nil
 }
 
 // planSaveFilename returns the file to save a PlanRequest under, or ok=false
@@ -752,7 +794,11 @@ type seedResult struct {
 	ArmJoints     []float64
 	ArmEndPose    spatialmath.Pose
 	BoardInCamera spatialmath.Pose
-	BoardInWorld  spatialmath.Pose
+	// SampleCenter: bounds anchor. LookAtPoint: world point positions aim at.
+	// ForwardInTarget: direction in goal-frame local coords that aims at LookAtPoint.
+	SampleCenter    spatialmath.Pose
+	LookAtPoint     r3.Vector
+	ForwardInTarget r3.Vector
 }
 
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
@@ -774,10 +820,6 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 		return nil, err
 	}
 
-	// arm.EndPosition returns arm-base coords, but the sweep planner takes
-	// targets as world-frame poses. Ask the frame system for the arm-end
-	// pose in world at the current joints, so bounds and generated targets
-	// naturally live in world.
 	armName := h.arm.Name().Name
 	armEndInWorld, err := h.fsService.TransformPose(ctx,
 		referenceframe.NewPoseInFrame(armName, spatialmath.NewZeroPose()),
@@ -786,14 +828,34 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 		return nil, fmt.Errorf("handeye: transform arm end to world: %w", err)
 	}
 
-	// Nominal camera-at-flange (X = identity); ~50-100mm off in practice, fine for sweep planning.
-	boardInWorld := spatialmath.Compose(armEndInWorld.Pose(), boardInCamera)
+	var sampleCenter spatialmath.Pose
+	var lookAtPoint r3.Vector
+	forwardInTarget := r3.Vector{Z: 1}
+	if h.cfg.isEyeToHand() {
+		sampleCenter = armEndInWorld.Pose()
+		cameraInWorldEst := spatialmath.Compose(armEndInWorld.Pose(), spatialmath.PoseInverse(boardInCamera))
+		lookAtPoint = cameraInWorldEst.Point()
+		cameraInBoard := spatialmath.PoseInverse(boardInCamera).Point()
+		if n := cameraInBoard.Norm(); n > 1e-9 {
+			forwardInTarget = cameraInBoard.Mul(1.0 / n)
+		}
+	} else {
+		boardInWorld := spatialmath.Compose(armEndInWorld.Pose(), boardInCamera)
+		sampleCenter = boardInWorld
+		lookAtPoint = boardInWorld.Point()
+		boardFromCam := boardInCamera.Point()
+		if n := boardFromCam.Norm(); n > 1e-9 {
+			forwardInTarget = boardFromCam.Mul(1.0 / n)
+		}
+	}
 
 	return &seedResult{
-		ArmJoints:     jointsToFloats(joints),
-		ArmEndPose:    endPose,
-		BoardInCamera: boardInCamera,
-		BoardInWorld:  boardInWorld,
+		ArmJoints:       jointsToFloats(joints),
+		ArmEndPose:      endPose,
+		BoardInCamera:   boardInCamera,
+		SampleCenter:    sampleCenter,
+		LookAtPoint:     lookAtPoint,
+		ForwardInTarget: forwardInTarget,
 	}, nil
 }
 
