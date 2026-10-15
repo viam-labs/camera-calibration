@@ -57,7 +57,7 @@ The values below match the recommended board from Step 1. **You must replace `ca
 }
 ```
 
-### Step 4: Configure the handeye service
+### Step 4: Configure the calibration service
 
 The `input_range_override` values below are xArm 6-specific — replace with limits appropriate to your arm.
 
@@ -65,7 +65,7 @@ The `input_range_override` values below are xArm 6-specific — replace with lim
 {
   "name": "calibration-handeye",
   "api": "rdk:service:generic",
-  "model": "viam:camera-calibration:handeye",
+  "model": "viam:camera-calibration:eye_in_hand",
   "attributes": {
     "arm": "your-arm-name",
     "pose_tracker": "calibration-charuco",
@@ -132,7 +132,7 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 
 > **On `distortion`**: for cameras that undistort on-device (e.g. Zivid, Ensenso, Orbbec), set to `[0, 0, 0, 0, 0]`. For cameras that publish real distortion coefficients (e.g. Realsense), leave unset.
 
-### `viam:camera-calibration:handeye`
+### `viam:camera-calibration:eye_in_hand`
 
 
 | Field                         | Required | Default | Description                                                                   |
