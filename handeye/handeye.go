@@ -563,6 +563,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	settleDur := time.Duration(h.cfg.SettleSeconds * float64(time.Second))
 	attempt := 0
 	consecutiveFailures := 0
+	var totalPlanDur time.Duration
+	defer func() {
+		h.logger.Infof("handeye: sweep spent %s with the arm stationary while planning (%d captured / %d attempted)",
+			totalPlanDur.Round(time.Millisecond), len(stations), attempt)
+	}()
 
 	// TODO: tailor the sweep-failure error to the dominant failure mode (unreachable → widen input_range_override; board-not-detected → camera setup).
 	recordFailure := func(reason string) error {
@@ -591,7 +596,8 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 
 		target := nextPose()
 
-		planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
+		planDur, planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
+		totalPlanDur += planDur
 		if execErr != nil {
 			return nil, fmt.Errorf("handeye: attempt %d execute failed, halting sweep: %w", attempt, execErr)
 		}
@@ -654,11 +660,11 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 	return fs, nil
 }
 
-func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planErr, execErr error) {
+func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planDur time.Duration, planErr, execErr error) {
 	armName := h.arm.Name().Name
 	fsInputs, err := h.fsService.CurrentInputs(ctx)
 	if err != nil {
-		return fmt.Errorf("get frame system inputs: %w", err), nil
+		return 0, fmt.Errorf("get frame system inputs: %w", err), nil
 	}
 
 	startState := armplanning.NewPlanState(nil, fsInputs)
@@ -673,9 +679,9 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	}
 	planStart := time.Now()
 	plan, _, err := armplanning.PlanMotion(ctx, h.logger, req)
-	planDur := time.Since(planStart)
+	planDur = time.Since(planStart)
 	if err != nil {
-		return fmt.Errorf("plan motion: %w", err), nil
+		return planDur, fmt.Errorf("plan motion: %w", err), nil
 	}
 	h.maybeSavePlanRequest(ctx, passID, req, planDur)
 
@@ -683,16 +689,16 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	for _, fsInputs := range plan.Trajectory() {
 		armInputs, err := fsInputs.GetFrameInputs(fs.Frame(armName))
 		if err != nil {
-			return fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
+			return planDur, fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
 		}
 		trajectory = append(trajectory, armInputs)
 	}
 
 	if err := h.arm.MoveThroughJointPositions(ctx, trajectory, nil, nil); err != nil {
 		h.saveFailureArtifacts(ctx, passID, req, trajectory, planDur)
-		return nil, fmt.Errorf("execute trajectory: %w", err)
+		return planDur, nil, fmt.Errorf("execute trajectory: %w", err)
 	}
-	return nil, nil
+	return planDur, nil, nil
 }
 
 // planSaveFilename returns the file to save a PlanRequest under, or ok=false
