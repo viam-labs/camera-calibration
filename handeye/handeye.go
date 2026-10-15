@@ -385,11 +385,46 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	lookAt := seedRes.LookAtPoint
 	forwardInTarget := seedRes.ForwardInTarget
+
+	visParams, err := h.fetchVisibilityParams(ctx)
+	if err != nil {
+		h.logger.Warnf("handeye: skipping visibility pre-filter: %v", err)
+	}
+	// Pre-check context: which pose is fixed, which moves per candidate.
+	var fixedBoardInWorld, fixedCameraInWorld spatialmath.Pose
+	if h.isEyeToHand() {
+		fixedCameraInWorld = spatialmath.NewPoseFromPoint(seedRes.LookAtPoint)
+	} else {
+		fixedBoardInWorld = seedRes.SampleCenter
+	}
+
+	const maxVisTries = 50
+	var prefilterRejections int
 	nextPose := func() spatialmath.Pose {
+		for i := 0; i < maxVisTries; i++ {
+			p := generatePose(lookAt, bounds, rng, forwardInTarget)
+			if visParams == nil {
+				return p
+			}
+			boardInWorld := fixedBoardInWorld
+			cameraInWorld := fixedCameraInWorld
+			if h.isEyeToHand() {
+				boardInWorld = p
+			} else {
+				cameraInWorld = p
+			}
+			if visParams.boardVisibleAt(p, boardInWorld, cameraInWorld) {
+				return p
+			}
+			prefilterRejections++
+		}
 		return generatePose(lookAt, bounds, rng, forwardInTarget)
 	}
 
 	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
+	if visParams != nil {
+		h.logger.Infof("handeye: visibility pre-filter rejected %d candidate poses before planning", prefilterRejections)
+	}
 	if err != nil {
 		fail(fmt.Errorf("handeye: sweep: %w", err))
 		return

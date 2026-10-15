@@ -222,9 +222,31 @@ func (c *charuco) DoCommand(ctx context.Context, cmd map[string]interface{}) (ma
 	switch v {
 	case "detect":
 		return c.detectViaCommand(ctx)
+	case "visibility_params":
+		return c.visibilityParams(ctx)
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected: detect", v)
+		return nil, fmt.Errorf("unknown verb %q; expected: detect, visibility_params", v)
 	}
+}
+
+func (c *charuco) visibilityParams(ctx context.Context) (map[string]interface{}, error) {
+	props, err := c.camera.Properties(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
+	}
+	if props.IntrinsicParams == nil {
+		return nil, fmt.Errorf("charuco: camera %q has no intrinsics", c.cfg.Camera)
+	}
+	return map[string]interface{}{
+		"fx":              props.IntrinsicParams.Fx,
+		"fy":              props.IntrinsicParams.Fy,
+		"cx":              props.IntrinsicParams.Ppx,
+		"cy":              props.IntrinsicParams.Ppy,
+		"width_px":        props.IntrinsicParams.Width,
+		"height_px":       props.IntrinsicParams.Height,
+		"board_width_mm":  float64(c.cfg.SquaresX) * c.cfg.SquareLengthMM,
+		"board_height_mm": float64(c.cfg.SquaresY) * c.cfg.SquareLengthMM,
+	}, nil
 }
 
 func (c *charuco) detectViaCommand(ctx context.Context) (map[string]interface{}, error) {
