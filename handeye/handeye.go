@@ -425,7 +425,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		pool.add(generateFiltered())
 	}
 	const poolRefillThreshold = 5
-	nextPose := func() spatialmath.Pose {
+	nextPose := func() (spatialmath.Pose, error) {
 		if pool.len() < poolRefillThreshold {
 			for i := 0; i < h.cfg.NumPoses; i++ {
 				pool.add(generateFiltered())
@@ -433,12 +433,9 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		}
 		current, cerr := h.arm.EndPosition(ctx, nil)
 		if cerr != nil {
-			h.logger.Warnf("handeye: skipping TSP ordering (arm.EndPosition failed): %v", cerr)
-			chosen := pool.poses[0]
-			pool.poses = pool.poses[1:]
-			return chosen
+			return nil, fmt.Errorf("read arm end position: %w", cerr)
 		}
-		return pool.popNearest(current)
+		return pool.popNearest(current), nil
 	}
 
 	stations, err := h.sweepAndCapture(ctx, h.cfg.NumPoses, nextPose)
@@ -661,7 +658,7 @@ func (h *handeye) cancel(ctx context.Context) (map[string]interface{}, error) {
 	return map[string]interface{}{"cancelled": true, "was_running": true}, nil
 }
 
-func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() spatialmath.Pose) ([]map[string]interface{}, error) {
+func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose func() (spatialmath.Pose, error)) ([]map[string]interface{}, error) {
 	fs, err := h.buildFrameSystem(ctx)
 	if err != nil {
 		return nil, err
@@ -703,7 +700,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, err
 		}
 
-		target := nextPose()
+		target, err := nextPose()
+		if err != nil {
+			return nil, fmt.Errorf("handeye: attempt %d next pose: %w", attempt, err)
+		}
 
 		planDur, planErr, execErr := h.planAndExecute(ctx, fs, target, passID)
 		totalPlanDur += planDur
