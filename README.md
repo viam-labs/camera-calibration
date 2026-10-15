@@ -130,7 +130,7 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 | `image_source`     | No       | first available | Stream to pull from a multi-stream camera (e.g. `"color"` on RGB+depth).                 |
 | `distortion`       | No       | from camera     | Override the camera's distortion coefficients (see note below).                          |
 
-> **On `distortion`**: for cameras that undistort on-device (e.g. Zivid, Ensenso), set to `[0, 0, 0, 0, 0]`. For cameras that publish real distortion coefficients (e.g. Realsense), leave unset.
+> **On `distortion`**: for cameras that undistort on-device (e.g. Zivid, Ensenso, Orbbec), set to `[0, 0, 0, 0, 0]`. For cameras that publish real distortion coefficients (e.g. Realsense), leave unset.
 
 ### `viam:camera-calibration:handeye`
 
