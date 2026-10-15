@@ -36,8 +36,12 @@ import (
 	"github.com/viam-labs/camera-calibration/pyrunner"
 )
 
-// Model is the handeye calibration service.
-var Model = resource.NewModel("viam", "camera-calibration", "handeye")
+// Model is the eye-in-hand calibration service.
+var Model = resource.NewModel("viam", "camera-calibration", "eye_in_hand")
+
+// DeprecatedModel is the former name for Model; kept as an alias that logs a
+// warning so existing configs don't break. Remove once no machine references it.
+var DeprecatedModel = resource.NewModel("viam", "camera-calibration", "handeye")
 
 func init() {
 	resource.RegisterService(generic.API, Model,
@@ -45,6 +49,16 @@ func init() {
 			Constructor: newHandeye,
 		},
 	)
+	resource.RegisterService(generic.API, DeprecatedModel,
+		resource.Registration[resource.Resource, *Config]{
+			Constructor: newHandeyeDeprecated,
+		},
+	)
+}
+
+func newHandeyeDeprecated(ctx context.Context, deps resource.Dependencies, conf resource.Config, logger logging.Logger) (resource.Resource, error) {
+	logger.Warn("viam:camera-calibration:handeye is deprecated — rename to viam:camera-calibration:eye_in_hand in your machine config. The handeye alias will be removed in a future release.")
+	return newHandeye(ctx, deps, conf, logger)
 }
 
 // Config is the handeye service configuration.

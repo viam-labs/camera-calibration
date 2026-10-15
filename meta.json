@@ -13,8 +13,14 @@
     },
     {
       "api": "rdk:service:generic",
+      "model": "viam:camera-calibration:eye_in_hand",
+      "short_description": "Hand-eye calibration for arm-mounted cameras.",
+      "markdown_link": "README.md"
+    },
+    {
+      "api": "rdk:service:generic",
       "model": "viam:camera-calibration:handeye",
-      "short_description": "Hand-eye calibration service for arm-mounted cameras.",
+      "short_description": "Deprecated alias for eye_in_hand.",
       "markdown_link": "README.md"
     }
   ],
