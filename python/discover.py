@@ -111,7 +111,7 @@ def discover(rgb_bytes, depth_bytes, intrinsics):
 
     dict_result = _detect_dictionary(gray)
     if dict_result is None:
-        raise ValueError("no ArUco markers detected in any dictionary")
+        raise ValueError("no ArUco markers detected. Check that the camera can see the entire board, or add the charuco pose_tracker manually (see README).")
     dict_name, dict_id, _, ids = dict_result
 
     camera_matrix = np.array([
