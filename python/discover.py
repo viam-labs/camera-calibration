@@ -135,7 +135,15 @@ def discover(rgb_bytes, depth_bytes, intrinsics):
 
     scale = _scale_from_depth(depth, gray.shape, obj_points, img_points, tvec)
     if scale is None:
-        raise ValueError("could not read valid depth at the board center. Check the camera is within the depth sensor's working range and the board isn't highly reflective.")
+        nonzero = int(np.count_nonzero(depth))
+        total = int(depth.size)
+        dmin = int(depth.min()) if nonzero > 0 else 0
+        dmax = int(depth.max())
+        raise ValueError(
+            f"could not read valid depth at the board center. "
+            f"depth frame: {depth.shape} dtype={depth.dtype} nonzero={nonzero}/{total} range=[{dmin},{dmax}]. "
+            f"If nonzero=0 the depth stream is empty — check the camera driver is publishing depth."
+        )
 
     return {
         "dictionary": dict_name,
