@@ -6,7 +6,6 @@ package discovery
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,7 +120,6 @@ func (s *service) DiscoverResources(ctx context.Context, _ map[string]any) ([]re
 		return nil, fmt.Errorf("charuco-discovery: discover.py: %w", err)
 	}
 	var parsed struct {
-		Error          string  `json:"error"`
 		Dictionary     string  `json:"dictionary"`
 		SquaresX       int     `json:"squares_x"`
 		SquaresY       int     `json:"squares_y"`
@@ -130,9 +128,6 @@ func (s *service) DiscoverResources(ctx context.Context, _ map[string]any) ([]re
 	}
 	if err := json.Unmarshal(stdout, &parsed); err != nil {
 		return nil, fmt.Errorf("charuco-discovery: parse discover.py output: %w", err)
-	}
-	if parsed.Error != "" {
-		return nil, errors.New(parsed.Error)
 	}
 
 	return []resource.Config{{

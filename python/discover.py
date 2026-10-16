@@ -150,7 +150,7 @@ def main():
             json.loads(sys.argv[3]),
         )
     except ValueError as e:
-        print(json.dumps({"error": str(e)}))
+        sys.stderr.write(str(e) + "\n")
         sys.exit(1)
     print(json.dumps(result))
 
