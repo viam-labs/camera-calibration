@@ -170,12 +170,26 @@ func (s *service) fetchRGBAndDepth(ctx context.Context) (rgb, depth []byte, err 
 		}
 		name := images[i].SourceName
 		if name == "depth" {
-			s.logger.Infof("charuco-discovery: depth decoded as %T bounds=%v model=%T", img, img.Bounds(), img.ColorModel())
+			s.logger.Infof("charuco-discovery: depth decoded as %T bounds=%v", img, img.Bounds())
 			if dm, ok := img.(*rimage.DepthMap); ok {
 				b := dm.Bounds()
-				cx, cy := b.Dx()/2, b.Dy()/2
-				s.logger.Infof("charuco-discovery: depth sample (center) = %d, (0,0) = %d, (cx,cy-50) = %d",
-					dm.GetDepth(cx, cy), dm.GetDepth(0, 0), dm.GetDepth(cx, cy-50))
+				var min, max uint16 = 65535, 0
+				var nonzero int
+				for y := 0; y < b.Dy(); y++ {
+					for x := 0; x < b.Dx(); x++ {
+						v := uint16(dm.GetDepth(x, y))
+						if v > 0 {
+							nonzero++
+							if v < min {
+								min = v
+							}
+							if v > max {
+								max = v
+							}
+						}
+					}
+				}
+				s.logger.Infof("charuco-discovery: DepthMap stats nonzero=%d min=%d max=%d", nonzero, min, max)
 			}
 		}
 		pngBytes, pngErr := encodePNG(img)
