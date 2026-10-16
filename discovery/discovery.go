@@ -7,11 +7,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/logging"
@@ -120,7 +122,11 @@ func (s *service) DiscoverResources(ctx context.Context, _ map[string]any) ([]re
 
 	stdout, err := pyrunner.Run(ctx, s.logger, s.pythonBin, s.scriptPath, rgbPath, depthPath, intrinsicsJSON)
 	if err != nil {
-		return nil, fmt.Errorf("charuco-discovery: discover.py: %w", err)
+		var rerr *pyrunner.RunError
+		if errors.As(err, &rerr) && rerr.Stderr != "" {
+			return nil, errors.New(strings.TrimSpace(rerr.Stderr))
+		}
+		return nil, fmt.Errorf("charuco-discovery: %w", err)
 	}
 	var parsed struct {
 		Dictionary     string  `json:"dictionary"`
