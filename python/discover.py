@@ -79,17 +79,24 @@ def _detect_grid(image, dict_id, num_markers, camera_matrix, dist):
     return best
 
 
-def _scale_from_depth(depth, obj_points, img_points, tvec):
+def _scale_from_depth(depth, color_shape, obj_points, img_points, tvec):
     center_obj = np.mean(obj_points.reshape(-1, 3), axis=0)
     center_img = np.mean(img_points.reshape(-1, 2), axis=0)
-    u, v = int(round(center_img[0])), int(round(center_img[1]))
-    if not (0 <= u < depth.shape[1] and 0 <= v < depth.shape[0]):
+    # Depth and color may have different resolutions; scale center coords to depth frame.
+    scale_u = depth.shape[1] / color_shape[1]
+    scale_v = depth.shape[0] / color_shape[0]
+    u = int(round(center_img[0] * scale_u))
+    v = int(round(center_img[1] * scale_v))
+    # Sample a patch and take median of valid pixels — single center pixel is often 0 on
+    # marker edges, reflective ink, or depth-shadow regions.
+    half = 10
+    u0, u1 = max(0, u - half), min(depth.shape[1], u + half + 1)
+    v0, v1 = max(0, v - half), min(depth.shape[0], v + half + 1)
+    patch = depth[v0:v1, u0:u1]
+    valid = patch[patch > 0]
+    if valid.size == 0:
         return None
-    depth_mm = float(depth[v, u])
-    if depth_mm <= 0:
-        return None
-    # tvec is in units of square_length (which we passed as 1.0). Pose t_z is distance to
-    # board origin (top-left corner), not center — recompute via obj_points centroid.
+    depth_mm = float(np.median(valid))
     distance_in_units = float(tvec.flatten()[2]) + float(center_obj[2])
     if distance_in_units <= 0:
         return None
@@ -126,9 +133,9 @@ def discover(rgb_bytes, depth_bytes, intrinsics):
         raise ValueError(f"detected dictionary {dict_name} but could not fit ChArUco grid")
     w, h, _, tvec, obj_points, img_points = grid
 
-    scale = _scale_from_depth(depth, obj_points, img_points, tvec)
+    scale = _scale_from_depth(depth, gray.shape, obj_points, img_points, tvec)
     if scale is None:
-        raise ValueError("could not read valid depth at board center")
+        raise ValueError("could not read valid depth at the board center. Check the camera is within the depth sensor's working range and the board isn't highly reflective.")
 
     return {
         "dictionary": dict_name,
