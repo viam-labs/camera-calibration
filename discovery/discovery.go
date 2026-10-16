@@ -4,9 +4,12 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 
@@ -151,17 +154,23 @@ func (s *service) fetchRGBAndDepth(ctx context.Context) (rgb, depth []byte, err 
 	if err != nil {
 		return nil, nil, fmt.Errorf("charuco-discovery: camera %q not responding: %w", s.cfg.Camera, err)
 	}
-	for _, img := range images {
-		name := img.SourceName
-		b, berr := img.Bytes(ctx)
-		if berr != nil {
-			return nil, nil, fmt.Errorf("charuco-discovery: read image bytes for %q: %w", name, berr)
+	// Decode each stream to image.Image (handles Viam's vnd.viam.dep + rgba formats
+	// via rimage's registered decoders) then re-encode as PNG so OpenCV can read it.
+	for i := range images {
+		img, imgErr := images[i].Image(ctx)
+		if imgErr != nil {
+			return nil, nil, fmt.Errorf("charuco-discovery: decode image %q: %w", images[i].SourceName, imgErr)
 		}
+		pngBytes, pngErr := encodePNG(img)
+		if pngErr != nil {
+			return nil, nil, fmt.Errorf("charuco-discovery: re-encode %q as PNG: %w", images[i].SourceName, pngErr)
+		}
+		name := images[i].SourceName
 		switch {
 		case rgb == nil && (name == "color" || name == "" || name == "rgb"):
-			rgb = b
+			rgb = pngBytes
 		case depth == nil && name == "depth":
-			depth = b
+			depth = pngBytes
 		}
 	}
 	if rgb == nil {
@@ -171,6 +180,14 @@ func (s *service) fetchRGBAndDepth(ctx context.Context) (rgb, depth []byte, err 
 		return nil, nil, fmt.Errorf("charuco-discovery: camera %q did not return a depth stream — charuco-discovery requires a depth-capable camera (RealSense, Orbbec, etc.); for RGB-only cameras configure the charuco pose_tracker manually (see README)", s.cfg.Camera)
 	}
 	return rgb, depth, nil
+}
+
+func encodePNG(img image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (s *service) intrinsicsJSON(ctx context.Context) (string, error) {
