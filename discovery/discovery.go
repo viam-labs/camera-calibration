@@ -18,6 +18,7 @@ import (
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/rimage"
 	"go.viam.com/rdk/services/discovery"
 	rdkutils "go.viam.com/rdk/utils"
 
@@ -167,11 +168,20 @@ func (s *service) fetchRGBAndDepth(ctx context.Context) (rgb, depth []byte, err 
 		if imgErr != nil {
 			return nil, nil, fmt.Errorf("charuco-discovery: decode image %q: %w", images[i].SourceName, imgErr)
 		}
+		name := images[i].SourceName
+		if name == "depth" {
+			s.logger.Infof("charuco-discovery: depth decoded as %T bounds=%v model=%T", img, img.Bounds(), img.ColorModel())
+			if dm, ok := img.(*rimage.DepthMap); ok {
+				b := dm.Bounds()
+				cx, cy := b.Dx()/2, b.Dy()/2
+				s.logger.Infof("charuco-discovery: depth sample (center) = %d, (0,0) = %d, (cx,cy-50) = %d",
+					dm.GetDepth(cx, cy), dm.GetDepth(0, 0), dm.GetDepth(cx, cy-50))
+			}
+		}
 		pngBytes, pngErr := encodePNG(img)
 		if pngErr != nil {
-			return nil, nil, fmt.Errorf("charuco-discovery: re-encode %q as PNG: %w", images[i].SourceName, pngErr)
+			return nil, nil, fmt.Errorf("charuco-discovery: re-encode %q as PNG: %w", name, pngErr)
 		}
-		name := images[i].SourceName
 		switch {
 		case rgb == nil && (name == "color" || name == "" || name == "rgb"):
 			rgb = pngBytes
