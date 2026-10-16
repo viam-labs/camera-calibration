@@ -28,6 +28,12 @@
       "model": "viam:camera-calibration:handeye",
       "short_description": "Deprecated alias for eye_in_hand.",
       "markdown_link": "README.md"
+    },
+    {
+      "api": "rdk:service:discovery",
+      "model": "viam:camera-calibration:charuco-discovery",
+      "short_description": "Auto-detect ChArUco board parameters from a depth camera and emit a charuco pose_tracker config.",
+      "markdown_link": "README.md"
     }
   ],
   "applications": null,
