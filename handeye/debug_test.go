@@ -26,13 +26,3 @@ func TestBoardDistanceAndTiltDeg45(t *testing.T) {
 	test.That(t, dist, test.ShouldAlmostEqual, math.Sqrt(300*300+400*400+1200*1200), 1e-6)
 	test.That(t, tilt, test.ShouldAlmostEqual, 45.0, 1e-4)
 }
-
-func TestDetectCountsHandlesMissingKeys(t *testing.T) {
-	nd, mc := detectCounts(map[string]interface{}{})
-	test.That(t, nd, test.ShouldEqual, 0)
-	test.That(t, mc, test.ShouldEqual, 0)
-
-	nd, mc = detectCounts(map[string]interface{}{"num_detected": float64(80), "marker_count": float64(60)})
-	test.That(t, nd, test.ShouldEqual, 80)
-	test.That(t, mc, test.ShouldEqual, 60)
-}

@@ -706,11 +706,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	attempt := 0
 	consecutiveFailures := 0
 	var totalPlanDur time.Duration
-	debug := &debugSink{logger: h.logger}
 	defer func() {
 		h.logger.Infof("handeye: sweep spent %s with the arm stationary while planning (%d captured / %d attempted)",
 			totalPlanDur.Round(time.Millisecond), len(stations), attempt)
-		debug.logWorstStations(stations, 3)
+		logWorstStations(h.logger, stations, 3)
 	}()
 
 	// TODO: tailor the sweep-failure error to the dominant failure mode (unreachable → widen input_range_override; board-not-detected → camera setup).
@@ -767,21 +766,17 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			return nil, fmt.Errorf("handeye: attempt %d halted: %w", attempt, err)
 		}
 
-		attemptJoints, jerr := h.arm.JointPositions(ctx, nil)
-		if jerr != nil {
-			return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, jerr)
-		}
-		numDetected, markerCount := detectCounts(detectResp)
+		numDetectedF, _ := detectResp["num_detected"].(float64)
+		markerCountF, _ := detectResp["marker_count"].(float64)
+		numDetected, markerCount := int(numDetectedF), int(markerCountF)
 
 		boardInCamera, err := parseBoardPose(detectResp)
 		if err != nil {
-			debug.logCapture(debugCapture{
-				attempt:     attempt,
-				status:      "nodetect",
-				numDetected: numDetected,
-				markerCount: markerCount,
-				joints:      jointsToFloats(attemptJoints),
-			})
+			joints, jerr := h.arm.JointPositions(ctx, nil)
+			if jerr != nil {
+				return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, jerr)
+			}
+			logNoDetect(h.logger, attempt, numDetected, markerCount, jointsToFloats(joints))
 			if capErr := recordFailure("board not detected"); capErr != nil {
 				return nil, capErr
 			}
@@ -791,6 +786,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		actualEndPose, err := h.arm.EndPosition(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("handeye: read arm pose at attempt %d: %w", attempt, err)
+		}
+		joints, err := h.arm.JointPositions(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, err)
 		}
 
 		reprojErr, _ := detectResp["reprojection_error_px"].(float64)
@@ -806,17 +805,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Unlock()
 
 		dist, tilt := boardDistanceAndTiltDeg(boardInCamera)
-		debug.logCapture(debugCapture{
-			attempt:      attempt,
-			stationIdx:   len(stations),
-			status:       "ok",
-			reproj:       reprojErr,
-			numDetected:  numDetected,
-			markerCount:  markerCount,
-			boardDistMM:  dist,
-			boardTiltDeg: tilt,
-			joints:       jointsToFloats(attemptJoints),
-		})
+		logStationOk(h.logger, len(stations), attempt, reprojErr, numDetected, markerCount, dist, tilt, jointsToFloats(joints))
 
 		if shouldStop(stations) {
 			h.logger.Infof("handeye: quality gates passed at %d captures; stopping sweep early", len(stations))

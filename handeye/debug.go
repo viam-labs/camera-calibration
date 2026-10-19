@@ -4,67 +4,48 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/spatialmath"
 )
 
-type debugCapture struct {
-	attempt      int
-	stationIdx   int
-	status       string
-	reproj       float64
-	numDetected  int
-	markerCount  int
-	boardDistMM  float64
-	boardTiltDeg float64
-	joints       []float64
+func logStationOk(logger logging.Logger, stationIdx, attempt int, reproj float64, numDetected, markerCount int, distMM, tiltDeg float64, joints []float64) {
+	logger.Infof(
+		"handeye: station %d (attempt %d) ok: reproj=%.2fpx, corners=%d, markers=%d, dist=%.0fmm, tilt=%.1f°, joints=%s",
+		stationIdx, attempt, reproj, numDetected, markerCount, distMM, tiltDeg, jointsDeg(joints),
+	)
 }
 
-type debugSink struct {
-	logger logging.Logger
+func logNoDetect(logger logging.Logger, attempt, numDetected, markerCount int, joints []float64) {
+	logger.Infof(
+		"handeye: attempt %d board not detected: corners=%d, markers=%d, joints=%s",
+		attempt, numDetected, markerCount, jointsDeg(joints),
+	)
 }
 
-func (s *debugSink) logCapture(c debugCapture) {
-	if s == nil {
-		return
-	}
-	switch c.status {
-	case "ok":
-		s.logger.Infof(
-			"handeye: station %d (attempt %d) ok: reproj=%.2fpx, corners=%d, markers=%d, dist=%.0fmm, tilt=%.1f°, joints=%s",
-			c.stationIdx, c.attempt, c.reproj, c.numDetected, c.markerCount, c.boardDistMM, c.boardTiltDeg, formatJointsDeg(c.joints),
-		)
-	case "nodetect":
-		s.logger.Infof(
-			"handeye: attempt %d board not detected: corners=%d, markers=%d, joints=%s",
-			c.attempt, c.numDetected, c.markerCount, formatJointsDeg(c.joints),
-		)
-	}
-}
-
-func (s *debugSink) logWorstStations(stations []map[string]interface{}, n int) {
-	if s == nil || len(stations) == 0 {
+func logWorstStations(logger logging.Logger, stations []map[string]interface{}, n int) {
+	if len(stations) == 0 {
 		return
 	}
 	type scored struct {
 		idx    int
 		reproj float64
 	}
-	scores := make([]scored, 0, len(stations))
+	scores := make([]scored, len(stations))
 	for i, st := range stations {
 		r, _ := st["reprojection_error_px"].(float64)
-		scores = append(scores, scored{idx: i + 1, reproj: r})
+		scores[i] = scored{idx: i + 1, reproj: r}
 	}
 	sort.Slice(scores, func(i, j int) bool { return scores[i].reproj > scores[j].reproj })
 	if n > len(scores) {
 		n = len(scores)
 	}
-	parts := make([]string, 0, n)
+	parts := make([]string, n)
 	for i := 0; i < n; i++ {
-		parts = append(parts, fmt.Sprintf("#%d=%.2fpx", scores[i].idx, scores[i].reproj))
+		parts[i] = fmt.Sprintf("#%d=%.2fpx", scores[i].idx, scores[i].reproj)
 	}
-	s.logger.Infof("handeye: top-%d worst stations by reprojection: %s", n, joinWithComma(parts))
+	logger.Infof("handeye: top-%d worst stations by reprojection: %s", n, strings.Join(parts, ", "))
 }
 
 // boardDistanceAndTiltDeg returns distance and the angle between board normal
@@ -83,17 +64,7 @@ func boardDistanceAndTiltDeg(boardInCamera spatialmath.Pose) (distMM, tiltDeg fl
 	return
 }
 
-func detectCounts(detectResp map[string]interface{}) (numDetected, markerCount int) {
-	if v, ok := detectResp["num_detected"].(float64); ok {
-		numDetected = int(v)
-	}
-	if v, ok := detectResp["marker_count"].(float64); ok {
-		markerCount = int(v)
-	}
-	return
-}
-
-func formatJointsDeg(radians []float64) string {
+func jointsDeg(radians []float64) string {
 	if len(radians) == 0 {
 		return "[]"
 	}
@@ -101,16 +72,5 @@ func formatJointsDeg(radians []float64) string {
 	for i, r := range radians {
 		parts[i] = fmt.Sprintf("%.1f", r*180.0/math.Pi)
 	}
-	return "[" + joinWithComma(parts) + "]°"
-}
-
-func joinWithComma(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += ", "
-		}
-		out += p
-	}
-	return out
+	return "[" + strings.Join(parts, ", ") + "]°"
 }
