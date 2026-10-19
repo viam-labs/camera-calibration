@@ -316,12 +316,12 @@ func (c *charuco) captureAndDetect(ctx context.Context) (*captureResult, error) 
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-	if _, err := tmpFile.Write(imgBytes); err != nil {
+	if _, werr := tmpFile.Write(imgBytes); werr != nil {
 		_ = tmpFile.Close()
-		return nil, fmt.Errorf("charuco: write temp file: %w", err)
+		return nil, fmt.Errorf("charuco: write temp file: %w", werr)
 	}
-	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("charuco: close temp file: %w", err)
+	if cerr := tmpFile.Close(); cerr != nil {
+		return nil, fmt.Errorf("charuco: close temp file: %w", cerr)
 	}
 
 	stdout, err := pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,

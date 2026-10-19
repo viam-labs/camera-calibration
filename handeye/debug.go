@@ -92,7 +92,7 @@ func resolveDebugImageDir(logger logging.Logger, cfgDir, passID string) string {
 		return ""
 	}
 	dir := filepath.Join(base, fmt.Sprintf("%s_%s", time.Now().Format("20060102-150405"), passID))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		logger.Warnf("handeye: cannot create debug_image_dir %q: %v — images will not be saved", dir, err)
 		return ""
 	}
@@ -115,7 +115,7 @@ func saveDebugImage(logger logging.Logger, dir string, detectResp map[string]int
 	}
 	mime, _ := detectResp["image_mime_type"].(string)
 	path := filepath.Join(dir, fmt.Sprintf("attempt_%03d_%s%s", attempt, status, extForMime(mime)))
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		logger.Warnf("handeye: debug image write %s failed: %v", path, err)
 	}
 }

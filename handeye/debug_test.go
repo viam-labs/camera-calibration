@@ -55,7 +55,7 @@ func TestSaveDebugImageWritesFile(t *testing.T) {
 	test.That(t, strings.HasPrefix(entries[0].Name(), "attempt_007_ok"), test.ShouldBeTrue)
 	test.That(t, strings.HasSuffix(entries[0].Name(), ".jpg"), test.ShouldBeTrue)
 
-	saved, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	saved, err := os.ReadFile(filepath.Join(dir, entries[0].Name())) //nolint:gosec // test reads a file it just wrote under t.TempDir()
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, saved, test.ShouldResemble, payload)
 }
