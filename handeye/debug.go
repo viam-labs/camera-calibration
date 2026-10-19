@@ -61,7 +61,7 @@ func boardDistanceAndTiltDeg(boardInCamera spatialmath.Pose) (distMM, tiltDeg fl
 		cos = -1
 	}
 	tiltDeg = math.Acos(cos) * 180.0 / math.Pi
-	return
+	return distMM, tiltDeg
 }
 
 func jointsDeg(radians []float64) string {
