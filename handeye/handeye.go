@@ -726,6 +726,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	defer func() {
 		h.logger.Infof("handeye: sweep spent %s with the arm stationary while planning (%d captured / %d attempted)",
 			totalPlanDur.Round(time.Millisecond), len(stations), attempt)
+		logWorstStations(h.logger, stations, 3)
 	}()
 
 	// TODO: tailor the sweep-failure error to the dominant failure mode (unreachable → widen input_range_override; board-not-detected → camera setup).
@@ -781,18 +782,31 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		if err != nil {
 			return nil, fmt.Errorf("handeye: attempt %d halted: %w", attempt, err)
 		}
+
+		numDetectedF, _ := detectResp["num_detected"].(float64)
+		markerCountF, _ := detectResp["marker_count"].(float64)
+		numDetected, markerCount := int(numDetectedF), int(markerCountF)
+
 		boardInCamera, err := parseBoardPose(detectResp)
 		if err != nil {
+			joints, jerr := h.arm.JointPositions(ctx, nil)
+			if jerr != nil {
+				return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, jerr)
+			}
+			logNoDetect(h.logger, attempt, numDetected, markerCount, jointsToFloats(joints))
 			if capErr := recordFailure("board not detected"); capErr != nil {
 				return nil, capErr
 			}
-			h.logger.Infof("handeye: attempt %d board not detected, skipping", attempt)
 			continue
 		}
 
 		actualEndPose, err := h.arm.EndPosition(ctx, nil)
 		if err != nil {
 			return nil, fmt.Errorf("handeye: read arm pose at attempt %d: %w", attempt, err)
+		}
+		joints, err := h.arm.JointPositions(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, err)
 		}
 
 		reprojErr, _ := detectResp["reprojection_error_px"].(float64)
@@ -806,6 +820,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Lock()
 		h.progress.positionsCaptured = len(stations)
 		h.mu.Unlock()
+
+		dist, tilt := boardDistanceAndTiltDeg(boardInCamera)
+		logStationOk(h.logger, len(stations), attempt, reprojErr, numDetected, markerCount, dist, tilt, jointsToFloats(joints))
+
 		if shouldStop(stations) {
 			h.logger.Infof("handeye: quality gates passed at %d captures; stopping sweep early", len(stations))
 			break
