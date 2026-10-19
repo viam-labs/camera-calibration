@@ -358,11 +358,33 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		fail(fmt.Errorf("handeye: seed: %w", err))
 		return
 	}
-	centerPt := seedRes.SampleCenter.Point()
-	centerRvec := seedRes.SampleCenter.Orientation().AxisAngles().ToR3()
+
+	visParams, err := h.fetchVisibilityParams(ctx)
+	if err != nil {
+		h.logger.Warnf("handeye: skipping visibility pre-filter: %v", err)
+	}
+	// OpenCV's board frame origin is the top-left chessboard corner, not the center;
+	// shift so sampleCenter / boardInArm anchor on the actual middle of the board.
+	var boardOriginToCenter spatialmath.Pose
+	if visParams != nil {
+		boardOriginToCenter = spatialmath.NewPoseFromPoint(r3.Vector{X: visParams.halfW, Y: visParams.halfH})
+	}
+	sampleCenter := seedRes.SampleCenter
+	lookAt := seedRes.LookAtPoint
+	if boardOriginToCenter != nil && !h.isEyeToHand() {
+		sampleCenter = spatialmath.Compose(sampleCenter, boardOriginToCenter)
+		lookAt = sampleCenter.Point()
+	}
+	boardInArm := seedRes.BoardInArm
+	if boardOriginToCenter != nil && h.isEyeToHand() {
+		boardInArm = spatialmath.Compose(boardInArm, boardOriginToCenter)
+	}
+
+	centerPt := sampleCenter.Point()
+	centerRvec := sampleCenter.Orientation().AxisAngles().ToR3()
 	h.logger.Infof("handeye: seed sample_center=(%.1f, %.1f, %.1f) rvec=(%.3f, %.3f, %.3f) look_at=(%.1f, %.1f, %.1f)",
 		centerPt.X, centerPt.Y, centerPt.Z, centerRvec.X, centerRvec.Y, centerRvec.Z,
-		seedRes.LookAtPoint.X, seedRes.LookAtPoint.Y, seedRes.LookAtPoint.Z)
+		lookAt.X, lookAt.Y, lookAt.Z)
 
 	bounds := h.cfg.WorkspaceBounds
 	if bounds.IsZero() {
@@ -377,20 +399,15 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	//nolint:gosec // sampling for pose generation, not crypto
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	lookAt := seedRes.LookAtPoint
 	forwardInTarget := seedRes.ForwardInTarget
 
-	visParams, err := h.fetchVisibilityParams(ctx)
-	if err != nil {
-		h.logger.Warnf("handeye: skipping visibility pre-filter: %v", err)
-	}
 	var fixedBoardInWorld, fixedCameraInWorld spatialmath.Pose
 	var frameOffset spatialmath.Pose
 	if h.isEyeToHand() {
 		fixedCameraInWorld = seedRes.CameraInWorldEst
-		frameOffset = seedRes.BoardInArm
+		frameOffset = boardInArm
 	} else {
-		fixedBoardInWorld = seedRes.SampleCenter
+		fixedBoardInWorld = sampleCenter
 		frameOffset = seedRes.CameraInArm
 	}
 	frameOffsetInv := spatialmath.PoseInverse(frameOffset)

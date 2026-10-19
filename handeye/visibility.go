@@ -13,6 +13,7 @@ type visibilityParams struct {
 	fx, fy, cx, cy float64
 	widthPx        int
 	heightPx       int
+	halfW, halfH   float64     // physical board half-width/half-height in mm
 	boardCorners   []r3.Vector // 5 test points in board frame: 4 outer corners + center
 }
 
@@ -77,6 +78,7 @@ func (h *handeye) fetchVisibilityParams(ctx context.Context) (*visibilityParams,
 	return &visibilityParams{
 		fx: fx, fy: fy, cx: cx, cy: cy,
 		widthPx: w, heightPx: hpx,
+		halfW: halfW, halfH: halfH,
 		boardCorners: []r3.Vector{
 			{X: 0, Y: 0, Z: 0},
 			{X: -halfW, Y: -halfH, Z: 0},
