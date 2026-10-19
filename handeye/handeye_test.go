@@ -105,7 +105,10 @@ func mockArm() *inject.Arm {
 
 func mockTracker() *inject.PoseTracker {
 	tr := &inject.PoseTracker{}
-	tr.DoFunc = func(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+	tr.DoFunc = func(_ context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+		if _, ok := cmd["camera"]; ok {
+			return map[string]interface{}{"name": "test-camera"}, nil
+		}
 		return map[string]interface{}{
 			"board_pose_mm": map[string]interface{}{
 				"translation": []interface{}{10.0, 20.0, 400.0},

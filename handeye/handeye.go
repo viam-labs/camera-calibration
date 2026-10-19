@@ -385,33 +385,43 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		h.logger.Warnf("handeye: skipping visibility pre-filter: %v", err)
 	}
 	var fixedBoardInWorld, fixedCameraInWorld spatialmath.Pose
+	var frameOffset spatialmath.Pose
 	if h.isEyeToHand() {
 		fixedCameraInWorld = seedRes.CameraInWorldEst
+		frameOffset = seedRes.BoardInArm
 	} else {
 		fixedBoardInWorld = seedRes.SampleCenter
+		frameOffset = seedRes.CameraInArm
+	}
+	frameOffsetInv := spatialmath.PoseInverse(frameOffset)
+
+	// generatePose produces a camera/board target pose in world; back-solve through the
+	// frame offset to the arm-end goal that puts the camera/board at that target.
+	toArmEnd := func(target spatialmath.Pose) spatialmath.Pose {
+		return spatialmath.Compose(target, frameOffsetInv)
 	}
 
 	const maxVisTries = 50
 	var prefilterRejections int
 	generateFiltered := func() spatialmath.Pose {
 		for i := 0; i < maxVisTries; i++ {
-			p := generatePose(lookAt, bounds, rng, forwardInTarget)
+			target := generatePose(lookAt, bounds, rng, forwardInTarget)
 			if visParams == nil {
-				return p
+				return toArmEnd(target)
 			}
 			boardInWorld := fixedBoardInWorld
 			cameraInWorld := fixedCameraInWorld
 			if h.isEyeToHand() {
-				boardInWorld = p
+				boardInWorld = target
 			} else {
-				cameraInWorld = p
+				cameraInWorld = target
 			}
 			if visParams.boardVisibleAt(boardInWorld, cameraInWorld) {
-				return p
+				return toArmEnd(target)
 			}
 			prefilterRejections++
 		}
-		return generatePose(lookAt, bounds, rng, forwardInTarget)
+		return toArmEnd(generatePose(lookAt, bounds, rng, forwardInTarget))
 	}
 
 	pool := &posePool{}
@@ -896,15 +906,33 @@ func (h *handeye) saveFailureArtifacts(ctx context.Context, passID string, req *
 }
 
 type seedResult struct {
-	ArmJoints     []float64
-	ArmEndPose    spatialmath.Pose
-	BoardInCamera spatialmath.Pose
-	// SampleCenter: bounds anchor. LookAtPoint: world point positions aim at.
-	// ForwardInTarget: direction in goal-frame local coords that aims at LookAtPoint.
+	ArmJoints        []float64
+	ArmEndPose       spatialmath.Pose
+	BoardInCamera    spatialmath.Pose
 	SampleCenter     spatialmath.Pose
 	LookAtPoint      r3.Vector
 	ForwardInTarget  r3.Vector
 	CameraInWorldEst spatialmath.Pose // eye-to-hand only; nil for eye-in-hand
+	// CameraInArm is the camera's pose relative to the arm end (eye-in-hand only).
+	// BoardInArm is the board's pose relative to the arm end (eye-to-hand only).
+	// Generated arm-end goals back-solve from the desired camera/board target through these.
+	CameraInArm spatialmath.Pose
+	BoardInArm  spatialmath.Pose
+}
+
+func (h *handeye) resolveCameraName(ctx context.Context) (string, error) {
+	if h.cfg.TargetCamera != "" {
+		return h.cfg.TargetCamera, nil
+	}
+	resp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"camera": map[string]interface{}{}})
+	if err != nil {
+		return "", fmt.Errorf("handeye: ask pose_tracker for camera name: %w", err)
+	}
+	name, _ := resp["name"].(string)
+	if name == "" {
+		return "", fmt.Errorf("handeye: pose_tracker returned empty camera name; set target_camera on the handeye service to override")
+	}
+	return name, nil
 }
 
 func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
@@ -934,26 +962,47 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 		return nil, fmt.Errorf("handeye: transform arm end to world: %w", err)
 	}
 
+	cameraName, err := h.resolveCameraName(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cameraInWorldPIF, err := h.fsService.TransformPose(ctx,
+		referenceframe.NewPoseInFrame(cameraName, spatialmath.NewZeroPose()),
+		referenceframe.World, nil)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: transform camera %q to world: %w", cameraName, err)
+	}
+	cameraInWorld := cameraInWorldPIF.Pose()
+
+	// Direction from camera to board, in camera frame — used as the local-forward
+	// axis to point the camera (or the board face) at a world target.
+	forwardInTarget := r3.Vector{Z: 1}
+	if n := boardInCamera.Point().Norm(); n > 1e-9 {
+		forwardInTarget = boardInCamera.Point().Mul(1.0 / n)
+	}
+
 	var sampleCenter spatialmath.Pose
 	var lookAtPoint r3.Vector
 	var cameraInWorldEst spatialmath.Pose
-	forwardInTarget := r3.Vector{Z: 1}
+	var cameraInArm, boardInArm spatialmath.Pose
 	if h.isEyeToHand() {
-		sampleCenter = armEndInWorld.Pose()
-		cameraInWorldEst = spatialmath.Compose(armEndInWorld.Pose(), spatialmath.PoseInverse(boardInCamera))
-		lookAtPoint = cameraInWorldEst.Point()
+		// Board sits on the arm; infer its arm-end offset from measured camera + detected board.
+		boardInWorld := spatialmath.Compose(cameraInWorld, boardInCamera)
+		boardInArm = spatialmath.Compose(spatialmath.PoseInverse(armEndInWorld.Pose()), boardInWorld)
+		sampleCenter = boardInWorld
+		lookAtPoint = cameraInWorld.Point()
+		cameraInWorldEst = cameraInWorld
+		// Board face points toward camera: use board→camera direction in board frame.
 		cameraInBoard := spatialmath.PoseInverse(boardInCamera).Point()
 		if n := cameraInBoard.Norm(); n > 1e-9 {
 			forwardInTarget = cameraInBoard.Mul(1.0 / n)
 		}
 	} else {
-		boardInWorld := spatialmath.Compose(armEndInWorld.Pose(), boardInCamera)
+		// Camera sits on the arm; cameraInArm comes from the framesystem directly.
+		cameraInArm = spatialmath.Compose(spatialmath.PoseInverse(armEndInWorld.Pose()), cameraInWorld)
+		boardInWorld := spatialmath.Compose(cameraInWorld, boardInCamera)
 		sampleCenter = boardInWorld
 		lookAtPoint = boardInWorld.Point()
-		boardFromCam := boardInCamera.Point()
-		if n := boardFromCam.Norm(); n > 1e-9 {
-			forwardInTarget = boardFromCam.Mul(1.0 / n)
-		}
 	}
 
 	return &seedResult{
@@ -964,6 +1013,8 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 		LookAtPoint:      lookAtPoint,
 		ForwardInTarget:  forwardInTarget,
 		CameraInWorldEst: cameraInWorldEst,
+		CameraInArm:      cameraInArm,
+		BoardInArm:       boardInArm,
 	}, nil
 }
 
