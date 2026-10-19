@@ -39,7 +39,28 @@ func Run(ctx context.Context, logger logging.Logger, pythonBin, scriptPath strin
 	duration := time.Since(start)
 	logger.Debugf("pyrunner: %s completed in %s", filepath.Base(scriptPath), duration)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s failed after %s: %w\nstderr: %s", pythonBin, scriptPath, duration, err, stderr.String())
+		return nil, &RunError{
+			PythonBin:  pythonBin,
+			ScriptPath: scriptPath,
+			Duration:   duration,
+			Stderr:     stderr.String(),
+			Err:        err,
+		}
 	}
 	return stdout.Bytes(), nil
 }
+
+// RunError exposes stderr so callers can surface the Python-side message instead of the wrapped exec error.
+type RunError struct {
+	PythonBin  string
+	ScriptPath string
+	Duration   time.Duration
+	Stderr     string
+	Err        error
+}
+
+func (e *RunError) Error() string {
+	return fmt.Sprintf("%s %s failed after %s: %v\nstderr: %s", e.PythonBin, e.ScriptPath, e.Duration, e.Err, e.Stderr)
+}
+
+func (e *RunError) Unwrap() error { return e.Err }
