@@ -5,6 +5,7 @@ package charuco
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -221,7 +222,8 @@ func (c *charuco) DoCommand(ctx context.Context, cmd map[string]interface{}) (ma
 	}
 	switch v {
 	case "detect":
-		return c.detectViaCommand(ctx)
+		args, _ := cmd[v].(map[string]interface{})
+		return c.detectViaCommand(ctx, args)
 	case "visibility_params":
 		return c.visibilityParams(ctx)
 	case "camera":
@@ -251,31 +253,41 @@ func (c *charuco) visibilityParams(ctx context.Context) (map[string]interface{},
 	}, nil
 }
 
-func (c *charuco) detectViaCommand(ctx context.Context) (map[string]interface{}, error) {
-	stdout, err := c.captureAndDetect(ctx)
+type captureResult struct {
+	imageBytes []byte
+	mimeType   string
+	detectJSON []byte
+}
+
+func (c *charuco) detectViaCommand(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+	cap, err := c.captureAndDetect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var result map[string]interface{}
-	if err := json.Unmarshal(stdout, &result); err != nil {
+	if err := json.Unmarshal(cap.detectJSON, &result); err != nil {
 		return nil, fmt.Errorf("charuco: parse detect.py output: %w", err)
+	}
+	if includeImage, _ := args["include_image"].(bool); includeImage {
+		result["image_bytes_b64"] = base64.StdEncoding.EncodeToString(cap.imageBytes)
+		result["image_mime_type"] = cap.mimeType
 	}
 	return result, nil
 }
 
 func (c *charuco) captureAndParse(ctx context.Context) (*detectResponse, error) {
-	stdout, err := c.captureAndDetect(ctx)
+	cap, err := c.captureAndDetect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var resp detectResponse
-	if err := json.Unmarshal(stdout, &resp); err != nil {
+	if err := json.Unmarshal(cap.detectJSON, &resp); err != nil {
 		return nil, fmt.Errorf("charuco: parse detect.py output: %w", err)
 	}
 	return &resp, nil
 }
 
-func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
+func (c *charuco) captureAndDetect(ctx context.Context) (*captureResult, error) {
 	intrinsicsJSON, err := c.intrinsicsJSON(ctx)
 	if err != nil {
 		return nil, err
@@ -296,6 +308,7 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("charuco: get image bytes: %w", err)
 	}
+	mimeType := images[0].MimeType()
 
 	tmpFile, err := os.CreateTemp("", "charuco-*.img")
 	if err != nil {
@@ -303,15 +316,15 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-	if _, err := tmpFile.Write(imgBytes); err != nil {
+	if _, werr := tmpFile.Write(imgBytes); werr != nil {
 		_ = tmpFile.Close()
-		return nil, fmt.Errorf("charuco: write temp file: %w", err)
+		return nil, fmt.Errorf("charuco: write temp file: %w", werr)
 	}
-	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("charuco: close temp file: %w", err)
+	if cerr := tmpFile.Close(); cerr != nil {
+		return nil, fmt.Errorf("charuco: close temp file: %w", cerr)
 	}
 
-	return pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,
+	stdout, err := pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,
 		tmpFile.Name(),
 		c.cfg.Dictionary,
 		strconv.Itoa(c.cfg.SquaresX),
@@ -320,6 +333,10 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 		strconv.FormatFloat(c.cfg.MarkerLengthMM, 'f', -1, 64),
 		intrinsicsJSON,
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &captureResult{imageBytes: imgBytes, mimeType: mimeType, detectJSON: stdout}, nil
 }
 
 // RDK order [k1, k2, k3, p1, p2] -> OpenCV order [k1, k2, p1, p2, k3].
