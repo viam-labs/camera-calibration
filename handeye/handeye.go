@@ -97,6 +97,7 @@ type Config struct {
 	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 	SaveAllPlans             bool                            `json:"save_all_plans,omitempty"`
+	DebugImageDir            string                          `json:"debug_image_dir,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -706,6 +707,11 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 	attempt := 0
 	consecutiveFailures := 0
 	var totalPlanDur time.Duration
+	debugDir := resolveDebugImageDir(h.logger, h.cfg.DebugImageDir, passID)
+	detectArgs := map[string]interface{}{}
+	if debugDir != "" {
+		detectArgs["include_image"] = true
+	}
 	defer func() {
 		h.logger.Infof("handeye: sweep spent %s with the arm stationary while planning (%d captured / %d attempted)",
 			totalPlanDur.Round(time.Millisecond), len(stations), attempt)
@@ -761,7 +767,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		case <-time.After(settleDur):
 		}
 
-		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": map[string]interface{}{}})
+		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": detectArgs})
 		if err != nil {
 			return nil, fmt.Errorf("handeye: attempt %d halted: %w", attempt, err)
 		}
@@ -776,6 +782,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			if jerr != nil {
 				return nil, fmt.Errorf("handeye: read joints at attempt %d: %w", attempt, jerr)
 			}
+			saveDebugImage(h.logger, debugDir, detectResp, attempt, "nodetect")
 			logNoDetect(h.logger, attempt, numDetected, markerCount, jointsToFloats(joints))
 			if capErr := recordFailure("board not detected"); capErr != nil {
 				return nil, capErr
@@ -805,6 +812,7 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		h.mu.Unlock()
 
 		dist, tilt := boardDistanceAndTiltDeg(boardInCamera)
+		saveDebugImage(h.logger, debugDir, detectResp, attempt, "ok")
 		logStationOk(h.logger, len(stations), attempt, reprojErr, numDetected, markerCount, dist, tilt, jointsToFloats(joints))
 
 		if shouldStop(stations) {

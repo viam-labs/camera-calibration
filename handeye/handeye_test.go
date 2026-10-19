@@ -48,6 +48,7 @@ func TestConfigValidate(t *testing.T) {
 		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be >= 0 (0 uses the default), got -1"},
 		{name: "max_reprojection_error_px negative", mutate: func(c *Config) { c.MaxReprojectionErrorPx = -1 }, wantErr: "max_reprojection_error_px must be >= 0 (0 uses the default), got -1"},
 		{name: "max_consecutive_failures negative", mutate: func(c *Config) { c.MaxConsecutiveFailures = -1 }, wantErr: "max_consecutive_failures must be >= 0 (0 uses the default), got -1"},
+		{name: "debug_image_dir set validates ok", mutate: func(c *Config) { c.DebugImageDir = "${VIAM_MODULE_DATA_DIR}/handeye_debug" }, wantErr: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

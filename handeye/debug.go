@@ -1,10 +1,14 @@
 package handeye
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/spatialmath"
@@ -73,4 +77,56 @@ func jointsDeg(radians []float64) string {
 		parts[i] = fmt.Sprintf("%.1f", r*180.0/math.Pi)
 	}
 	return "[" + strings.Join(parts, ", ") + "]°"
+}
+
+// resolveDebugImageDir expands env vars in cfgDir and creates a per-sweep
+// subdirectory. Returns "" if cfgDir is unset or the directory can't be made
+// (image save is a best-effort debug aid).
+func resolveDebugImageDir(logger logging.Logger, cfgDir, passID string) string {
+	if cfgDir == "" {
+		return ""
+	}
+	base := os.ExpandEnv(cfgDir)
+	if base == "" {
+		logger.Warnf("handeye: debug_image_dir resolved to empty after env expansion of %q — images will not be saved", cfgDir)
+		return ""
+	}
+	dir := filepath.Join(base, fmt.Sprintf("%s_%s", time.Now().Format("20060102-150405"), passID))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logger.Warnf("handeye: cannot create debug_image_dir %q: %v — images will not be saved", dir, err)
+		return ""
+	}
+	logger.Infof("handeye: saving debug capture images to %s", dir)
+	return dir
+}
+
+func saveDebugImage(logger logging.Logger, dir string, detectResp map[string]interface{}, attempt int, status string) {
+	if dir == "" {
+		return
+	}
+	b64, _ := detectResp["image_bytes_b64"].(string)
+	if b64 == "" {
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		logger.Warnf("handeye: debug image attempt %d decode failed: %v", attempt, err)
+		return
+	}
+	mime, _ := detectResp["image_mime_type"].(string)
+	path := filepath.Join(dir, fmt.Sprintf("attempt_%03d_%s%s", attempt, status, extForMime(mime)))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		logger.Warnf("handeye: debug image write %s failed: %v", path, err)
+	}
+}
+
+func extForMime(mime string) string {
+	switch mime {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	default:
+		return ".bin"
+	}
 }
