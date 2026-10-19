@@ -395,8 +395,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	}
 	frameOffsetInv := spatialmath.PoseInverse(frameOffset)
 
-	// generatePose produces a camera/board target pose in world; back-solve through the
-	// frame offset to the arm-end goal that puts the camera/board at that target.
+	// generatePose returns a camera/board target in world; back-solve to the arm-end goal.
 	toArmEnd := func(target spatialmath.Pose) spatialmath.Pose {
 		return spatialmath.Compose(target, frameOffsetInv)
 	}
@@ -912,12 +911,9 @@ type seedResult struct {
 	SampleCenter     spatialmath.Pose
 	LookAtPoint      r3.Vector
 	ForwardInTarget  r3.Vector
-	CameraInWorldEst spatialmath.Pose // eye-to-hand only; nil for eye-in-hand
-	// CameraInArm is the camera's pose relative to the arm end (eye-in-hand only).
-	// BoardInArm is the board's pose relative to the arm end (eye-to-hand only).
-	// Generated arm-end goals back-solve from the desired camera/board target through these.
-	CameraInArm spatialmath.Pose
-	BoardInArm  spatialmath.Pose
+	CameraInWorldEst spatialmath.Pose // eye-to-hand only
+	CameraInArm      spatialmath.Pose // eye-in-hand only
+	BoardInArm       spatialmath.Pose // eye-to-hand only
 }
 
 func (h *handeye) resolveCameraName(ctx context.Context) (string, error) {
@@ -974,8 +970,7 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	}
 	cameraInWorld := cameraInWorldPIF.Pose()
 
-	// Direction from camera to board, in camera frame — used as the local-forward
-	// axis to point the camera (or the board face) at a world target.
+	// Camera->board direction in camera frame; used as the local-forward axis for look-at.
 	forwardInTarget := r3.Vector{Z: 1}
 	if n := boardInCamera.Point().Norm(); n > 1e-9 {
 		forwardInTarget = boardInCamera.Point().Mul(1.0 / n)
@@ -986,19 +981,17 @@ func (h *handeye) seed(ctx context.Context) (*seedResult, error) {
 	var cameraInWorldEst spatialmath.Pose
 	var cameraInArm, boardInArm spatialmath.Pose
 	if h.isEyeToHand() {
-		// Board sits on the arm; infer its arm-end offset from measured camera + detected board.
 		boardInWorld := spatialmath.Compose(cameraInWorld, boardInCamera)
 		boardInArm = spatialmath.Compose(spatialmath.PoseInverse(armEndInWorld.Pose()), boardInWorld)
 		sampleCenter = boardInWorld
 		lookAtPoint = cameraInWorld.Point()
 		cameraInWorldEst = cameraInWorld
-		// Board face points toward camera: use board→camera direction in board frame.
+		// Board face points at the camera: use board->camera direction in board frame.
 		cameraInBoard := spatialmath.PoseInverse(boardInCamera).Point()
 		if n := cameraInBoard.Norm(); n > 1e-9 {
 			forwardInTarget = cameraInBoard.Mul(1.0 / n)
 		}
 	} else {
-		// Camera sits on the arm; cameraInArm comes from the framesystem directly.
 		cameraInArm = spatialmath.Compose(spatialmath.PoseInverse(armEndInWorld.Pose()), cameraInWorld)
 		boardInWorld := spatialmath.Compose(cameraInWorld, boardInCamera)
 		sampleCenter = boardInWorld
