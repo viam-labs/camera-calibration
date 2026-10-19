@@ -224,8 +224,10 @@ func (c *charuco) DoCommand(ctx context.Context, cmd map[string]interface{}) (ma
 		return c.detectViaCommand(ctx)
 	case "visibility_params":
 		return c.visibilityParams(ctx)
+	case "camera":
+		return map[string]interface{}{"name": c.cfg.Camera}, nil
 	default:
-		return nil, fmt.Errorf("unknown verb %q; expected: detect, visibility_params", v)
+		return nil, fmt.Errorf("unknown verb %q; expected: detect, visibility_params, camera", v)
 	}
 }
 
