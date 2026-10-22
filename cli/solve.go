@@ -7,15 +7,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.viam.com/rdk/cli"
+	"go.viam.com/rdk/logging"
 )
 
 func runSolve(cmd *cobra.Command, _ []string) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
 	logger := setupLogger("solve")
 
 	if solveFlags.PassID == "" {
@@ -26,8 +32,11 @@ func runSolve(cmd *cobra.Command, _ []string) {
 	}
 
 	passDir := filepath.Join(solveFlags.DownloadsDirectory, solveFlags.PassID)
-	if _, err := os.Stat(passDir); err != nil {
-		logger.Fatalf("pass dir %q not found — did you run `download` first? %v", passDir, err)
+	if !passDirHasSidecars(passDir) {
+		logger.Infof("pass %s not present locally, downloading first", solveFlags.PassID)
+		if err := downloadPassForSolve(ctx, logger); err != nil {
+			logger.Fatalf("auto-download: %v", err)
+		}
 	}
 
 	stations, mode, err := loadStations(passDir)
@@ -178,4 +187,49 @@ func invokeSolver(stations []map[string]interface{}, method, calibType, pythonBi
 		return nil, fmt.Errorf("parse solve.py output: %w", err)
 	}
 	return result, nil
+}
+
+// passDirHasSidecars is true if the dir exists and contains at least one
+// station-NN.json file. Lets `solve` auto-download when the pass isn't
+// present yet without re-downloading already-complete ones.
+func passDirHasSidecars(passDir string) bool {
+	entries, err := os.ReadDir(passDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if _, ok := stationIDFromFilename(e.Name()); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func downloadPassForSolve(ctx context.Context, logger logging.Logger) error {
+	client, err := cli.ConnectToApp(ctx, logger)
+	if err != nil {
+		return fmt.Errorf("connect to viam app: %w", err)
+	}
+	orgID := solveFlags.OrgID
+	if orgID == "" {
+		orgID, err = discoverOrgForPass(ctx, logger, client, solveFlags.PassID)
+		if err != nil {
+			return fmt.Errorf("discover org: %w", err)
+		}
+	}
+	passDir := filepath.Join(solveFlags.DownloadsDirectory, solveFlags.PassID)
+	if mkErr := os.MkdirAll(passDir, 0o750); mkErr != nil {
+		return fmt.Errorf("create pass dir: %w", mkErr)
+	}
+	files, err := listBinaryDataByTag(ctx, logger, client, orgID, solveFlags.PassID)
+	if err != nil {
+		return fmt.Errorf("list binary data: %w", err)
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("no files found for pass %q in org %q", solveFlags.PassID, orgID)
+	}
+	return downloadFiles(ctx, logger, client, passDir, files)
 }

@@ -38,6 +38,7 @@ type DownloadFlags struct {
 type SolveFlags struct {
 	PassID             string
 	DownloadsDirectory string
+	OrgID              string
 	Method             string
 	CalibrationType    string
 	PythonBin          string
@@ -54,7 +55,8 @@ func init() {
 	rootCmd.AddCommand(downloadCmd)
 
 	solveCmd.Flags().StringVar(&solveFlags.PassID, "pass-id", "", "pass ID to replay (required)")
-	solveCmd.Flags().StringVar(&solveFlags.DownloadsDirectory, "downloads-dir", "./downloads", "local folder holding the pass dir (as written by `download`)")
+	solveCmd.Flags().StringVar(&solveFlags.DownloadsDirectory, "downloads-dir", "./downloads", "local folder holding the pass dir (will download here if the pass isn't already present)")
+	solveCmd.Flags().StringVar(&solveFlags.OrgID, "org-id", "", "optional Viam org id when solve needs to auto-download the pass")
 	solveCmd.Flags().StringVar(&solveFlags.Method, "method", "tsai", "solver method: tsai, park, horaud, andreff, daniilidis")
 	solveCmd.Flags().StringVar(&solveFlags.CalibrationType, "calibration-type", "", "override calibration_type (eye_in_hand or eye_to_hand); default is inferred from sidecars")
 	solveCmd.Flags().StringVar(&solveFlags.PythonBin, "python-bin", ".venv/bin/python", "python interpreter to invoke")
