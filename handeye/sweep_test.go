@@ -10,8 +10,8 @@ import (
 	"go.viam.com/test"
 )
 
-func testBounds() WorkspaceBounds {
-	return WorkspaceBounds{
+func testBounds() AbsoluteBounds {
+	return AbsoluteBounds{
 		X: AxisBounds{Min: -100, Max: 100},
 		Y: AxisBounds{Min: -100, Max: 100},
 		Z: AxisBounds{Min: 200, Max: 400},
@@ -40,7 +40,71 @@ func TestLookAtRotationDegenerateErrors(t *testing.T) {
 
 func TestWorkspaceBoundsIsZero(t *testing.T) {
 	test.That(t, WorkspaceBounds{}.IsZero(), test.ShouldBeTrue)
-	test.That(t, WorkspaceBounds{X: AxisBounds{Min: -1, Max: 1}}.IsZero(), test.ShouldBeFalse)
+	test.That(t, WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute}.IsZero(), test.ShouldBeFalse)
+	test.That(t, WorkspaceBounds{Absolute: &AbsoluteBounds{}}.IsZero(), test.ShouldBeFalse)
+	test.That(t, WorkspaceBounds{Relative: &AbsoluteBounds{}}.IsZero(), test.ShouldBeFalse)
+}
+
+func TestWorkspaceBoundsResolveRelative(t *testing.T) {
+	w := WorkspaceBounds{
+		Mode: WorkspaceBoundsModeRelativeToBoard,
+		Relative: &AbsoluteBounds{
+			X: AxisBounds{Min: -300, Max: 300},
+			Y: AxisBounds{Min: -300, Max: 300},
+			Z: AxisBounds{Min: 450, Max: 800},
+		},
+	}
+	got := w.Resolve(r3.Vector{X: 100, Y: 1000, Z: -200})
+	test.That(t, got.X, test.ShouldResemble, AxisBounds{Min: -200, Max: 400})
+	test.That(t, got.Y, test.ShouldResemble, AxisBounds{Min: 700, Max: 1300})
+	test.That(t, got.Z, test.ShouldResemble, AxisBounds{Min: 250, Max: 600})
+}
+
+func TestWorkspaceBoundsResolveAbsolute(t *testing.T) {
+	abs := AbsoluteBounds{
+		X: AxisBounds{Min: 10, Max: 20},
+		Y: AxisBounds{Min: 30, Max: 40},
+		Z: AxisBounds{Min: 50, Max: 60},
+	}
+	w := WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute, Absolute: &abs}
+	// boardCenter must be ignored in absolute mode.
+	got := w.Resolve(r3.Vector{X: 999, Y: 999, Z: 999})
+	test.That(t, got, test.ShouldResemble, abs)
+}
+
+func TestValidateWorkspaceBounds(t *testing.T) {
+	okAbs := &AbsoluteBounds{
+		X: AxisBounds{Min: -1, Max: 1},
+		Y: AxisBounds{Min: -1, Max: 1},
+		Z: AxisBounds{Min: -1, Max: 1},
+	}
+	tests := []struct {
+		name    string
+		w       WorkspaceBounds
+		wantErr string
+	}{
+		{"absolute ok", WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute, Absolute: okAbs}, ""},
+		{"relative ok", WorkspaceBounds{Mode: WorkspaceBoundsModeRelativeToBoard, Relative: okAbs}, ""},
+		{"mode missing", WorkspaceBounds{Absolute: okAbs}, `workspace_bounds.mode must be`},
+		{"mode unknown", WorkspaceBounds{Mode: "bogus"}, `unrecognized`},
+		{"absolute mode missing payload", WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute}, `workspace_bounds.absolute is missing`},
+		{"relative mode missing payload", WorkspaceBounds{Mode: WorkspaceBoundsModeRelativeToBoard}, `workspace_bounds.relative_to_board is missing`},
+		{"absolute mode both payloads", WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute, Absolute: okAbs, Relative: okAbs}, `remove workspace_bounds.relative_to_board`},
+		{"relative mode both payloads", WorkspaceBounds{Mode: WorkspaceBoundsModeRelativeToBoard, Absolute: okAbs, Relative: okAbs}, `remove workspace_bounds.absolute`},
+		{"absolute inverted axis", WorkspaceBounds{Mode: WorkspaceBoundsModeAbsolute, Absolute: &AbsoluteBounds{X: AxisBounds{Min: 5, Max: 5}, Y: okAbs.Y, Z: okAbs.Z}}, `absolute.x.min (5)`},
+		{"relative inverted axis", WorkspaceBounds{Mode: WorkspaceBoundsModeRelativeToBoard, Relative: &AbsoluteBounds{X: okAbs.X, Y: AxisBounds{Min: 1, Max: -1}, Z: okAbs.Z}}, `relative_to_board.y.min (1)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateWorkspaceBounds(tt.w)
+			if tt.wantErr == "" {
+				test.That(t, err, test.ShouldBeNil)
+				return
+			}
+			test.That(t, err, test.ShouldNotBeNil)
+			test.That(t, err.Error(), test.ShouldContainSubstring, tt.wantErr)
+		})
+	}
 }
 
 func TestDeriveDefaultBounds(t *testing.T) {
@@ -109,7 +173,7 @@ func TestGeneratePoseRollVaries(t *testing.T) {
 	// Narrow bounds force near-identical positions so orientation differences
 	// come from roll variation, not position variation.
 	target := r3.Vector{X: 0, Y: 0, Z: 0}
-	bounds := WorkspaceBounds{
+	bounds := AbsoluteBounds{
 		X: AxisBounds{Min: 50, Max: 51},
 		Y: AxisBounds{Min: 50, Max: 51},
 		Z: AxisBounds{Min: 300, Max: 301},

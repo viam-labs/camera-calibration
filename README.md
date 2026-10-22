@@ -134,7 +134,7 @@ Both models take the same attributes.
 | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------- |
 | `arm`                         | Yes      | —       | Name of the arm.                                                              |
 | `pose_tracker`                | Yes      | —       | Name of the pose_tracker (usually the charuco above).                         |
-| `workspace_bounds`            | No       | auto    | Sample region for calibration poses. Auto-derived from the board position if omitted. |
+| `workspace_bounds`            | No       | auto    | Sample region for calibration poses (see below). Auto-derived from the board position if omitted. |
 | `settle_seconds`              | No       | 2.0     | Delay after each arm move before capturing.                                   |
 | `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Keys are joint indices (`"0"`, `"1"`, ...) or joint names; values are `{"Min": ..., "Max": ...}`. Applied to the arm named in `arm`. |
 | `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config. Set to `false` to skip the write and inspect the result manually. |
@@ -143,10 +143,41 @@ Both models take the same attributes.
 | `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
 | `min_pose_diversity_deg`      | No       | 30.0    | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
 | `max_reprojection_error_px`   | No       | 2.0     | Skip auto-apply if the mean per-station board-corner reprojection error exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
+| `max_station_reprojection_error_px` | No | 0 (off) | When set, skip auto-apply if the single worst per-station reprojection exceeds this. Catches runs where a bad outlier station hides behind an acceptable mean. |
 | `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. |
 | `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. |
 | `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Supersedes `save_slow_plan_threshold_ms`. |
 | `allowed_collision_obstacles` | No       | `[]`    | Frame names (typically obstacle components) to drop from the planning frame system for this calibration run only. Lets you keep workcell obstacles configured for normal operation without disabling them to calibrate. Each name must exist in the current frame system. |
+
+#### `workspace_bounds`
+
+Pick a mode. Omit the whole block to auto-derive bounds around the observed board.
+
+`"relative_to_board"` — portable. Offsets (mm) are added to the seed's observed board center every run, so the bounds track the board if it moves. Prefer this for shared fragments.
+
+```json
+"workspace_bounds": {
+  "mode": "relative_to_board",
+  "relative_to_board": {
+    "x": {"min": -300, "max": 300},
+    "y": {"min": -300, "max": 300},
+    "z": {"min":  450, "max": 800}
+  }
+}
+```
+
+`"absolute"` — arm-base-frame coordinates in mm. Hardcoded to one board placement; re-tune if the board moves.
+
+```json
+"workspace_bounds": {
+  "mode": "absolute",
+  "absolute": {
+    "x": {"min": -200, "max": 400},
+    "y": {"min":  800, "max": 1600},
+    "z": {"min":  150, "max": 500}
+  }
+}
+```
 
 ### DoCommands
 
@@ -172,7 +203,7 @@ Both models take the same attributes.
 }
 ```
 
-`quality.status` is `"success"` when every gate passed, `"failed"` otherwise. `quality.failed_gates` lists which ones tripped (`translation_residual`, `rotation_residual`, `pose_diversity`, `mean_reprojection`).
+`quality.status` is `"success"` when every gate passed, `"failed"` otherwise. `quality.failed_gates` lists which ones tripped (`translation_residual`, `rotation_residual`, `pose_diversity`, `mean_reprojection`, `max_station_reprojection`).
 
 The `frame` block matches the schema of a camera's `frame` config, so if `auto_applied: false` you can copy it straight into the camera's config.
 

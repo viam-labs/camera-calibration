@@ -30,6 +30,7 @@ func goodQuality() map[string]interface{} {
 		"rotation_residual_deg":        0.5,
 		"pose_diversity_deg":           96.0,
 		"mean_station_reprojection_px": 0.6,
+		"max_station_reprojection_px":  1.2,
 	}
 }
 
@@ -100,6 +101,37 @@ func TestEvaluateQualityGatesMissingFieldErrors(t *testing.T) {
 	_, err := h.evaluateQualityGates(map[string]interface{}{})
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "pose_diversity_deg")
+}
+
+func TestEvaluateQualityGatesMaxStationReprojUngatedByDefault(t *testing.T) {
+	// MaxStationReprojectionErrorPx is 0 (unset) → gate disabled; a huge
+	// per-station outlier should NOT fail the solve.
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: defaultGateCfg()}
+	q := goodQuality()
+	q["max_station_reprojection_px"] = 50.0
+	failed, err := h.evaluateQualityGates(q)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldBeEmpty)
+}
+
+func TestEvaluateQualityGatesMaxStationReprojFailsWhenSet(t *testing.T) {
+	cfg := defaultGateCfg()
+	cfg.MaxStationReprojectionErrorPx = 1.5
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: cfg}
+	q := goodQuality()
+	q["max_station_reprojection_px"] = 2.4 // mean fine, max over threshold
+	failed, err := h.evaluateQualityGates(q)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldResemble, []string{gateMaxStationReproj})
+}
+
+func TestEvaluateQualityGatesMaxStationReprojPassesWhenSet(t *testing.T) {
+	cfg := defaultGateCfg()
+	cfg.MaxStationReprojectionErrorPx = 1.5
+	h := &handeye{logger: logging.NewTestLogger(t), cfg: cfg}
+	failed, err := h.evaluateQualityGates(goodQuality()) // max = 1.2 < 1.5
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, failed, test.ShouldBeEmpty)
 }
 
 func TestStampQualityStatusSuccess(t *testing.T) {

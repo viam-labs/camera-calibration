@@ -9,6 +9,7 @@ require (
 	go.viam.com/test v1.2.5
 	go.viam.com/utils v0.14.1
 	golang.org/x/sync v0.22.0
+	gonum.org/v1/gonum v0.17.0
 )
 
 require (
@@ -222,7 +223,6 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
-	gonum.org/v1/gonum v0.17.0 // indirect
 	gonum.org/v1/plot v0.15.2 // indirect
 	google.golang.org/api v0.271.0 // indirect
 	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409 // indirect

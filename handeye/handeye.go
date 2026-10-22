@@ -94,9 +94,11 @@ type Config struct {
 	MaxRotationResidualDeg   float64                         `json:"max_rotation_residual_deg,omitempty"`
 	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
-	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
-	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
-	SaveAllPlans             bool                            `json:"save_all_plans,omitempty"`
+	// 0 disables the gate (opt-in).
+	MaxStationReprojectionErrorPx float64 `json:"max_station_reprojection_error_px,omitempty"`
+	MaxConsecutiveFailures        int     `json:"max_consecutive_failures,omitempty"`
+	SaveSlowPlanThresholdMs       int     `json:"save_slow_plan_threshold_ms,omitempty"`
+	SaveAllPlans                  bool    `json:"save_all_plans,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell
@@ -117,17 +119,8 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "pose_tracker")
 	}
 	if !cfg.WorkspaceBounds.IsZero() {
-		for _, axis := range []struct {
-			name string
-			b    AxisBounds
-		}{
-			{"x", cfg.WorkspaceBounds.X},
-			{"y", cfg.WorkspaceBounds.Y},
-			{"z", cfg.WorkspaceBounds.Z},
-		} {
-			if axis.b.Min >= axis.b.Max {
-				return nil, nil, fmt.Errorf("workspace_bounds.%s.min (%g) must be < max (%g); to auto-derive, omit the whole workspace_bounds block", axis.name, axis.b.Min, axis.b.Max)
-			}
+		if err := validateWorkspaceBounds(cfg.WorkspaceBounds); err != nil {
+			return nil, nil, err
 		}
 	}
 	if cfg.SettleSeconds < 0 {
@@ -144,6 +137,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.MaxReprojectionErrorPx < 0 {
 		return nil, nil, fmt.Errorf("max_reprojection_error_px must be >= 0 (0 uses the default), got %g", cfg.MaxReprojectionErrorPx)
+	}
+	if cfg.MaxStationReprojectionErrorPx < 0 {
+		return nil, nil, fmt.Errorf("max_station_reprojection_error_px must be >= 0 (0 disables the gate), got %g", cfg.MaxStationReprojectionErrorPx)
 	}
 	if cfg.MaxConsecutiveFailures < 0 {
 		return nil, nil, fmt.Errorf("max_consecutive_failures must be >= 0 (0 uses the default), got %d", cfg.MaxConsecutiveFailures)
@@ -396,8 +392,8 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		centerPt.X, centerPt.Y, centerPt.Z, centerRvec.X, centerRvec.Y, centerRvec.Z,
 		lookAt.X, lookAt.Y, lookAt.Z)
 
-	bounds := h.cfg.WorkspaceBounds
-	if bounds.IsZero() {
+	var bounds AbsoluteBounds
+	if h.cfg.WorkspaceBounds.IsZero() {
 		if h.isEyeToHand() {
 			bounds = deriveDefaultBoundsSymmetric(centerPt)
 		} else {
@@ -405,6 +401,12 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		}
 		h.logger.Infof("handeye: auto-derived workspace_bounds x=[%.1f, %.1f] y=[%.1f, %.1f] z=[%.1f, %.1f]",
 			bounds.X.Min, bounds.X.Max, bounds.Y.Min, bounds.Y.Max, bounds.Z.Min, bounds.Z.Max)
+	} else {
+		bounds = h.cfg.WorkspaceBounds.Resolve(centerPt)
+		if h.cfg.WorkspaceBounds.Mode == WorkspaceBoundsModeRelativeToBoard {
+			h.logger.Infof("handeye: resolved relative_to_board workspace_bounds x=[%.1f, %.1f] y=[%.1f, %.1f] z=[%.1f, %.1f]",
+				bounds.X.Min, bounds.X.Max, bounds.Y.Min, bounds.Y.Max, bounds.Z.Min, bounds.Z.Max)
+		}
 	}
 
 	//nolint:gosec // sampling for pose generation, not crypto
