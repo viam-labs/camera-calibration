@@ -15,23 +15,27 @@ type AxisBounds struct {
 	Max float64 `json:"max"`
 }
 
+// AbsoluteBounds is a resolved sampling region in mm, arm-base-frame.
 type AbsoluteBounds struct {
 	X AxisBounds `json:"x"`
 	Y AxisBounds `json:"y"`
 	Z AxisBounds `json:"z"`
 }
 
+// Valid values for WorkspaceBounds.Mode.
 const (
 	WorkspaceBoundsModeAbsolute        = "absolute"
 	WorkspaceBoundsModeRelativeToBoard = "relative_to_board"
 )
 
+// WorkspaceBounds is the user-facing sampling-region config.
 type WorkspaceBounds struct {
 	Mode     string          `json:"mode"`
 	Absolute *AbsoluteBounds `json:"absolute,omitempty"`
 	Relative *AbsoluteBounds `json:"relative_to_board,omitempty"`
 }
 
+// IsZero is true when the user omitted workspace_bounds entirely.
 func (w WorkspaceBounds) IsZero() bool {
 	return w.Mode == "" && w.Absolute == nil && w.Relative == nil
 }

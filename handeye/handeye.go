@@ -96,9 +96,9 @@ type Config struct {
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
 	// 0 disables the gate (opt-in).
 	MaxStationReprojectionErrorPx float64 `json:"max_station_reprojection_error_px,omitempty"`
-	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
-	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
-	SaveAllPlans             bool                            `json:"save_all_plans,omitempty"`
+	MaxConsecutiveFailures        int     `json:"max_consecutive_failures,omitempty"`
+	SaveSlowPlanThresholdMs       int     `json:"save_slow_plan_threshold_ms,omitempty"`
+	SaveAllPlans                  bool    `json:"save_all_plans,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell

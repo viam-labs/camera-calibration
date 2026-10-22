@@ -58,4 +58,3 @@ func TestSolveOrientationEncodingRoundTrip(t *testing.T) {
 		})
 	}
 }
-
