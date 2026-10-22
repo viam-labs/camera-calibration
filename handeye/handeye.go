@@ -950,8 +950,14 @@ func (h *handeye) saveStationMetadata(passID string, stationID int, armEndPose, 
 		"saved_image_path":      imagePath,
 	}
 	filename := fmt.Sprintf("station-%02d.json", stationID)
-	if err := file_utils.SaveJsonFile(meta, saveDir, filename, time.Now()); err != nil {
-		h.logger.Warnf("handeye: save station metadata %q: %v", filename, err)
+	payload, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		h.logger.Warnf("handeye: marshal station metadata: %v", err)
+		return
+	}
+	fullPath := filepath.Join(saveDir, filename)
+	if err := os.WriteFile(fullPath, payload, 0o600); err != nil {
+		h.logger.Warnf("handeye: write station metadata %q: %v", fullPath, err)
 	}
 }
 
