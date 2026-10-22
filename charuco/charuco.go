@@ -268,10 +268,7 @@ func (c *charuco) detectViaCommand(ctx context.Context, args map[string]interfac
 	return result, nil
 }
 
-// maybeSaveImage writes a copy of the detected image to the capture dir when
-// args carries save_image: true + a pass_id and station_id. Returns the saved
-// path on success. Image save failures are logged but non-fatal so a bad save
-// path cannot sink a running calibration.
+// Save failures are logged, not propagated — a bad save path must not sink detection.
 func (c *charuco) maybeSaveImage(args map[string]interface{}, imgBytes []byte, mimeType string) (string, bool) {
 	save, _ := args["save_image"].(bool)
 	if !save {

@@ -94,8 +94,7 @@ type Config struct {
 	MaxConsecutiveFailures  int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 	SaveAllPlans            bool                            `json:"save_all_plans,omitempty"`
-	// SaveCaptureImages: per-station raw image + metadata JSON to the capture dir, tagged by passID. Off by default.
-	SaveCaptureImages bool `json:"save_capture_images,omitempty"`
+	SaveCaptureImages       bool                            `json:"save_capture_images,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell
@@ -934,10 +933,7 @@ func (h *handeye) maybeSavePlanRequest(ctx context.Context, passID string, req *
 	h.logger.Infof("handeye: saved plan request (planning=%dms) pass=%s file=%s", planDur.Milliseconds(), passID, filename)
 }
 
-// saveStationMetadata writes per-station JSON for a successful capture so the
-// saved image has a sidecar describing the pose + reprojection it came from.
-// Save failures are logged, not propagated — a bad save path must not sink a
-// running calibration.
+// Save failures are logged, not propagated — a bad save path must not sink the calibration.
 func (h *handeye) saveStationMetadata(passID string, stationID int, armEndPose, boardInCamera spatialmath.Pose, reprojErr float64, imagePath string) {
 	saveDir := file_utils.GetPathInCaptureDir(fmt.Sprintf("tag=%s", passID))
 	if err := file_utils.EnsureDir(saveDir); err != nil {
