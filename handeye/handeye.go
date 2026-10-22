@@ -851,6 +851,9 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	if err != nil {
 		return 0, fmt.Errorf("get frame system inputs: %w", err), nil
 	}
+	for _, name := range h.cfg.AllowedCollisionObstacles {
+		delete(fsInputs, name)
+	}
 
 	startState := armplanning.NewPlanState(nil, fsInputs)
 	goalState := armplanning.NewPlanState(referenceframe.FrameSystemPoses{
