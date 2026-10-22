@@ -55,7 +55,23 @@ done | sort -k2
 
 Open the `.jpg` for the station with the worst reprojection. That's the image the detector was looking at when it tripped the gate.
 
-## Flags
+### Step 5: Re-run the Solver Locally (optional)
+
+Replay the hand-eye solve against the downloaded sidecars without touching hardware. Bit-exact against what the live run produced, so you can test hypotheses in seconds instead of waiting for 3-minute calibrations.
+
+```bash
+./bin/camera-calibration-cli solve --pass-id <PASS_ID>
+```
+
+Prints the resulting frame + residuals. Reads `station-*.json` from `./downloads/<PASS_ID>/`, invokes `python/solve.py` locally, and returns the same JSON the live module would have produced.
+
+If `calibration_type` isn't recorded in the sidecars (older passes from before this landed), pass it explicitly:
+
+```bash
+./bin/camera-calibration-cli solve --pass-id <PASS_ID> --calibration-type eye_in_hand
+```
+
+## `download` flags
 
 | Flag              | Required | Default         | Notes                                                     |
 | ----------------- | -------- | --------------- | --------------------------------------------------------- |
@@ -63,6 +79,17 @@ Open the `.jpg` for the station with the worst reprojection. That's the image th
 | `--downloads-dir` | no       | `./downloads`   | Local folder root to write into.                          |
 | `--org-id`        | no       | auto-discover   | Skip the per-org probe when you already know the org.     |
 | `--debug`         | no       | `false`         | Verbose logs on the download workers.                     |
+
+## `solve` flags
+
+| Flag                 | Required | Default            | Notes                                                                                   |
+| -------------------- | -------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `--pass-id`          | yes      | —                  | Pass ID to replay, e.g. `camera-calibration-1792698803`. Must already be downloaded.    |
+| `--downloads-dir`    | no       | `./downloads`      | Local folder holding the pass dir.                                                      |
+| `--method`           | no       | `tsai`             | OpenCV solver: `tsai`, `park`, `horaud`, `andreff`, `daniilidis`.                       |
+| `--calibration-type` | no       | inferred           | Override `eye_in_hand` or `eye_to_hand` when the sidecar doesn't carry it.              |
+| `--python-bin`       | no       | `.venv/bin/python` | Python interpreter.                                                                     |
+| `--solve-script`     | no       | `python/solve.py`  | Path to `solve.py` relative to CWD.                                                     |
 
 ## Prerequisite: Enable Saving
 
