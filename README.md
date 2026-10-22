@@ -139,11 +139,7 @@ Both models take the same attributes.
 | `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Keys are joint indices (`"0"`, `"1"`, ...) or joint names; values are `{"Min": ..., "Max": ...}`. Applied to the arm named in `arm`. |
 | `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config. Set to `false` to skip the write and inspect the result manually. |
 | `target_camera`               | No       | derived | Override which camera's `frame` block gets updated.                           |
-| `max_translation_residual_mm` | No       | 5.0     | Skip auto-apply if solve residual exceeds this.                               |
-| `max_rotation_residual_deg`   | No       | 2.0     | Skip auto-apply if solve residual exceeds this.                               |
-| `min_pose_diversity_deg`      | No       | 30.0    | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
-| `max_reprojection_error_px`   | No       | 2.0     | Skip auto-apply if the mean per-station board-corner reprojection error exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
-| `max_station_reprojection_error_px` | No | 0 (off) | When set, skip auto-apply if the single worst per-station reprojection exceeds this. Catches runs where a bad outlier station hides behind an acceptable mean. |
+| `quality`                     | No       | —       | Thresholds that drive early-stop and gate auto-apply (see below).             |
 | `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. |
 | `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. |
 | `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Supersedes `save_slow_plan_threshold_ms`. |
@@ -179,6 +175,28 @@ Pick a mode. Omit the whole block to auto-derive bounds around the observed boar
 }
 ```
 
+#### `quality`
+
+Thresholds the solve must clear. The sweep keeps capturing stations and re-solving until every gate passes, stopping early as soon as they do (or giving up at the hard pose cap). Separately, the final solve is auto-applied only if every gate passed. Field names mirror the metric names emitted in the DoCommand result's `quality` block; omit the whole block or any field to use defaults.
+
+```json
+"quality": {
+  "max_translation_residual_mm": 5.0,
+  "max_rotation_residual_deg": 2.0,
+  "min_pose_diversity_deg": 30.0,
+  "max_mean_station_reprojection_px": 2.0,
+  "max_station_reprojection_px": 0
+}
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `max_translation_residual_mm` | 5.0 | Skip auto-apply if solve translation residual exceeds this. |
+| `max_rotation_residual_deg` | 2.0 | Skip auto-apply if solve rotation residual exceeds this. |
+| `min_pose_diversity_deg` | 30.0 | Skip auto-apply if mean pairwise arm-rotation angle across stations is below this — the solve is mathematically underdetermined regardless of how good residuals look. |
+| `max_mean_station_reprojection_px` | 2.0 | Skip auto-apply if the mean per-station board-corner reprojection exceeds this. Sub-pixel is expected for good detections; large values usually mean wrong intrinsics, wrong distortion, or bad focus. |
+| `max_station_reprojection_px` | 0 (off) | When set, skip auto-apply if the single worst per-station reprojection exceeds this. Catches runs where a bad outlier station hides behind an acceptable mean. |
+
 ### DoCommands
 
 `calibrate` — runs the full pipeline; takes a few minutes; returns:
@@ -203,7 +221,7 @@ Pick a mode. Omit the whole block to auto-derive bounds around the observed boar
 }
 ```
 
-`quality.status` is `"success"` when every gate passed, `"failed"` otherwise. `quality.failed_gates` lists which ones tripped (`translation_residual`, `rotation_residual`, `pose_diversity`, `mean_reprojection`, `max_station_reprojection`).
+`quality.status` is `"success"` when every gate passed, `"failed"` otherwise. `quality.failed_gates` lists which ones tripped (`translation_residual`, `rotation_residual`, `pose_diversity`, `mean_reprojection`, `max_station_reprojection`). Thresholds are configured under `quality` on the service — see above.
 
 The `frame` block matches the schema of a camera's `frame` config, so if `auto_applied: false` you can copy it straight into the camera's config.
 

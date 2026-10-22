@@ -62,7 +62,15 @@ func TestConfigValidate(t *testing.T) {
 		}, wantErr: ""},
 		{name: "settle_seconds unset defaults to 2", mutate: func(c *Config) { c.SettleSeconds = 0 }, wantErr: ""},
 		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be >= 0 (0 uses the default), got -1"},
-		{name: "max_reprojection_error_px negative", mutate: func(c *Config) { c.MaxReprojectionErrorPx = -1 }, wantErr: "max_reprojection_error_px must be >= 0 (0 uses the default), got -1"},
+		{name: "quality.max_mean_station_reprojection_px negative", mutate: func(c *Config) {
+			c.Quality.MaxMeanStationReprojectionPx = -1
+		}, wantErr: "quality.max_mean_station_reprojection_px must be >= 0 (0 uses the default), got -1"},
+		{name: "quality.max_station_reprojection_px negative", mutate: func(c *Config) {
+			c.Quality.MaxStationReprojectionPx = -1
+		}, wantErr: "quality.max_station_reprojection_px must be >= 0 (0 disables the gate), got -1"},
+		{name: "quality.max_translation_residual_mm negative", mutate: func(c *Config) {
+			c.Quality.MaxTranslationResidualMM = -1
+		}, wantErr: "quality.max_translation_residual_mm must be >= 0 (0 uses the default), got -1"},
 		{name: "max_consecutive_failures negative", mutate: func(c *Config) { c.MaxConsecutiveFailures = -1 }, wantErr: "max_consecutive_failures must be >= 0 (0 uses the default), got -1"},
 	}
 	for _, tt := range tests {

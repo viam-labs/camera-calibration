@@ -83,27 +83,33 @@ func newHandeyeDeprecated(ctx context.Context, deps resource.Dependencies, conf 
 
 // Config is the handeye service configuration.
 type Config struct {
-	Arm                      string                          `json:"arm"`
-	PoseTracker              string                          `json:"pose_tracker"`
-	WorkspaceBounds          WorkspaceBounds                 `json:"workspace_bounds"`
-	SettleSeconds            float64                         `json:"settle_seconds"`
-	InputRangeOverride       map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
-	AutoApplyResult          *bool                           `json:"auto_apply_result,omitempty"`
-	TargetCamera             string                          `json:"target_camera,omitempty"`
-	MaxTranslationResidualMM float64                         `json:"max_translation_residual_mm,omitempty"`
-	MaxRotationResidualDeg   float64                         `json:"max_rotation_residual_deg,omitempty"`
-	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
-	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
-	// 0 disables the gate (opt-in).
-	MaxStationReprojectionErrorPx float64 `json:"max_station_reprojection_error_px,omitempty"`
-	MaxConsecutiveFailures        int     `json:"max_consecutive_failures,omitempty"`
-	SaveSlowPlanThresholdMs       int     `json:"save_slow_plan_threshold_ms,omitempty"`
-	SaveAllPlans                  bool    `json:"save_all_plans,omitempty"`
+	Arm                     string                          `json:"arm"`
+	PoseTracker             string                          `json:"pose_tracker"`
+	WorkspaceBounds         WorkspaceBounds                 `json:"workspace_bounds"`
+	SettleSeconds           float64                         `json:"settle_seconds"`
+	InputRangeOverride      map[string]referenceframe.Limit `json:"input_range_override,omitempty"`
+	AutoApplyResult         *bool                           `json:"auto_apply_result,omitempty"`
+	TargetCamera            string                          `json:"target_camera,omitempty"`
+	Quality                 QualityGates                    `json:"quality,omitempty"`
+	MaxConsecutiveFailures  int                             `json:"max_consecutive_failures,omitempty"`
+	SaveSlowPlanThresholdMs int                             `json:"save_slow_plan_threshold_ms,omitempty"`
+	SaveAllPlans            bool                            `json:"save_all_plans,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell
 	// obstacles configured for normal operation while still running calibration.
 	AllowedCollisionObstacles []string `json:"allowed_collision_obstacles,omitempty"`
+}
+
+// QualityGates are the thresholds the solve result must clear for auto-apply.
+// Field names mirror the metric fields emitted in the DoCommand result's `quality` block.
+type QualityGates struct {
+	MaxTranslationResidualMM     float64 `json:"max_translation_residual_mm,omitempty"`
+	MaxRotationResidualDeg       float64 `json:"max_rotation_residual_deg,omitempty"`
+	MinPoseDiversityDeg          float64 `json:"min_pose_diversity_deg,omitempty"`
+	MaxMeanStationReprojectionPx float64 `json:"max_mean_station_reprojection_px,omitempty"`
+	// 0 disables the gate (opt-in).
+	MaxStationReprojectionPx float64 `json:"max_station_reprojection_px,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -126,20 +132,20 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.SettleSeconds < 0 {
 		return nil, nil, fmt.Errorf("settle_seconds must be >= 0 (0 uses the default), got %g", cfg.SettleSeconds)
 	}
-	if cfg.MaxTranslationResidualMM < 0 {
-		return nil, nil, fmt.Errorf("max_translation_residual_mm must be >= 0 (0 uses the default), got %g", cfg.MaxTranslationResidualMM)
+	if cfg.Quality.MaxTranslationResidualMM < 0 {
+		return nil, nil, fmt.Errorf("quality.max_translation_residual_mm must be >= 0 (0 uses the default), got %g", cfg.Quality.MaxTranslationResidualMM)
 	}
-	if cfg.MaxRotationResidualDeg < 0 {
-		return nil, nil, fmt.Errorf("max_rotation_residual_deg must be >= 0 (0 uses the default), got %g", cfg.MaxRotationResidualDeg)
+	if cfg.Quality.MaxRotationResidualDeg < 0 {
+		return nil, nil, fmt.Errorf("quality.max_rotation_residual_deg must be >= 0 (0 uses the default), got %g", cfg.Quality.MaxRotationResidualDeg)
 	}
-	if cfg.MinPoseDiversityDeg < 0 {
-		return nil, nil, fmt.Errorf("min_pose_diversity_deg must be >= 0 (0 uses the default), got %g", cfg.MinPoseDiversityDeg)
+	if cfg.Quality.MinPoseDiversityDeg < 0 {
+		return nil, nil, fmt.Errorf("quality.min_pose_diversity_deg must be >= 0 (0 uses the default), got %g", cfg.Quality.MinPoseDiversityDeg)
 	}
-	if cfg.MaxReprojectionErrorPx < 0 {
-		return nil, nil, fmt.Errorf("max_reprojection_error_px must be >= 0 (0 uses the default), got %g", cfg.MaxReprojectionErrorPx)
+	if cfg.Quality.MaxMeanStationReprojectionPx < 0 {
+		return nil, nil, fmt.Errorf("quality.max_mean_station_reprojection_px must be >= 0 (0 uses the default), got %g", cfg.Quality.MaxMeanStationReprojectionPx)
 	}
-	if cfg.MaxStationReprojectionErrorPx < 0 {
-		return nil, nil, fmt.Errorf("max_station_reprojection_error_px must be >= 0 (0 disables the gate), got %g", cfg.MaxStationReprojectionErrorPx)
+	if cfg.Quality.MaxStationReprojectionPx < 0 {
+		return nil, nil, fmt.Errorf("quality.max_station_reprojection_px must be >= 0 (0 disables the gate), got %g", cfg.Quality.MaxStationReprojectionPx)
 	}
 	if cfg.MaxConsecutiveFailures < 0 {
 		return nil, nil, fmt.Errorf("max_consecutive_failures must be >= 0 (0 uses the default), got %d", cfg.MaxConsecutiveFailures)
@@ -156,12 +162,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 }
 
 const (
-	defaultMaxTranslationResidualMM = 5.0
-	defaultMaxRotationResidualDeg   = 2.0
-	defaultMinPoseDiversityDeg      = 30.0
-	defaultMaxReprojectionErrorPx   = 2.0
-	defaultMaxConsecutiveFailures   = 200
-	defaultSaveSlowPlanThresholdMs  = 1500
+	defaultMaxTranslationResidualMM     = 5.0
+	defaultMaxRotationResidualDeg       = 2.0
+	defaultMinPoseDiversityDeg          = 30.0
+	defaultMaxMeanStationReprojectionPx = 2.0
+	defaultMaxConsecutiveFailures       = 200
+	defaultSaveSlowPlanThresholdMs      = 1500
 
 	// start checking calibration quality after this many captures; stop as soon as it passes
 	minPosesForEarlyStop = 15
@@ -218,17 +224,17 @@ func newHandeye(
 	if cfg.SettleSeconds == 0 {
 		cfg.SettleSeconds = 2.0
 	}
-	if cfg.MaxTranslationResidualMM == 0 {
-		cfg.MaxTranslationResidualMM = defaultMaxTranslationResidualMM
+	if cfg.Quality.MaxTranslationResidualMM == 0 {
+		cfg.Quality.MaxTranslationResidualMM = defaultMaxTranslationResidualMM
 	}
-	if cfg.MaxRotationResidualDeg == 0 {
-		cfg.MaxRotationResidualDeg = defaultMaxRotationResidualDeg
+	if cfg.Quality.MaxRotationResidualDeg == 0 {
+		cfg.Quality.MaxRotationResidualDeg = defaultMaxRotationResidualDeg
 	}
-	if cfg.MinPoseDiversityDeg == 0 {
-		cfg.MinPoseDiversityDeg = defaultMinPoseDiversityDeg
+	if cfg.Quality.MinPoseDiversityDeg == 0 {
+		cfg.Quality.MinPoseDiversityDeg = defaultMinPoseDiversityDeg
 	}
-	if cfg.MaxReprojectionErrorPx == 0 {
-		cfg.MaxReprojectionErrorPx = defaultMaxReprojectionErrorPx
+	if cfg.Quality.MaxMeanStationReprojectionPx == 0 {
+		cfg.Quality.MaxMeanStationReprojectionPx = defaultMaxMeanStationReprojectionPx
 	}
 	if cfg.MaxConsecutiveFailures == 0 {
 		cfg.MaxConsecutiveFailures = defaultMaxConsecutiveFailures
