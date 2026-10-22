@@ -55,22 +55,23 @@ Each `.json` sidecar carries the arm end pose, board-in-camera pose, reprojectio
 | `--org-id`        | no       | auto-discover   | Skip the per-org probe when you already know the org.       |
 | `--debug`         | no       | `false`         | Verbose logs on the download workers.                       |
 
-### `solve` — replay the solver locally against a downloaded pass
+### `solve` — replay the solver locally
 
 ```bash
 ./bin/camera-calibration-cli solve --pass-id <PASS_ID>
 ```
 
-Bit-exact against what the live module produced on hardware. Lets you test hypotheses in seconds instead of waiting for 3-minute hardware runs: try different solver methods, pick which captures to feed in, etc.
+Bit-exact against what the live module produced on hardware. Auto-downloads the pass if it isn't already present under `--downloads-dir`, so `solve` is enough on its own — no separate `download` step required. Lets you test hypotheses in seconds instead of waiting for 3-minute hardware runs: try different solver methods, pick which captures to feed in, etc.
 
-| Flag                 | Required | Default            | Notes                                                                                   |
-| -------------------- | -------- | ------------------ | --------------------------------------------------------------------------------------- |
-| `--pass-id`          | yes      | —                  | Pass ID to replay. Must already be downloaded.                                          |
-| `--downloads-dir`    | no       | `./downloads`      | Local folder holding the pass dir.                                                      |
-| `--method`           | no       | `tsai`             | OpenCV solver: `tsai`, `park`, `horaud`, `andreff`, `daniilidis`.                       |
-| `--calibration-type` | no       | inferred           | Override `eye_in_hand` or `eye_to_hand` when the sidecar doesn't carry it (old passes). |
-| `--python-bin`       | no       | `.venv/bin/python` | Python interpreter.                                                                     |
-| `--solve-script`     | no       | `python/solve.py`  | Path to `solve.py` relative to CWD.                                                     |
+| Flag                 | Required | Default            | Notes                                                                                       |
+| -------------------- | -------- | ------------------ | ------------------------------------------------------------------------------------------- |
+| `--pass-id`          | yes      | —                  | Pass ID to replay.                                                                          |
+| `--downloads-dir`    | no       | `./downloads`      | Local folder holding the pass dir (will download here if the pass isn't present).           |
+| `--org-id`           | no       | auto-discover      | Only used when solve has to auto-download.                                                  |
+| `--method`           | no       | `tsai`             | OpenCV solver: `tsai`, `park`, `horaud`, `andreff`, `daniilidis`.                           |
+| `--calibration-type` | no       | inferred           | Override `eye_in_hand` or `eye_to_hand` when the sidecar doesn't carry it (old passes).     |
+| `--python-bin`       | no       | `.venv/bin/python` | Python interpreter.                                                                         |
+| `--solve-script`     | no       | `python/solve.py`  | Path to `solve.py` relative to CWD.                                                         |
 
 ## Workflows
 
