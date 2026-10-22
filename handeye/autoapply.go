@@ -26,10 +26,10 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 	if !ok {
 		return nil, errors.New("solve result missing quality.pose_diversity_deg")
 	}
-	if poseDiv < h.cfg.MinPoseDiversityDeg {
+	if poseDiv < h.cfg.Quality.MinPoseDiversityDeg {
 		h.logger.Warnf(
 			"handeye: pose diversity (%.2f°) below threshold (%.2f°) — arm rotations too clustered for a well-determined solve",
-			poseDiv, h.cfg.MinPoseDiversityDeg,
+			poseDiv, h.cfg.Quality.MinPoseDiversityDeg,
 		)
 		failed = append(failed, gatePoseDiversity)
 	}
@@ -38,9 +38,9 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 	if !ok {
 		return nil, errors.New("solve result missing quality.translation_residual_mm")
 	}
-	if transResidual > h.cfg.MaxTranslationResidualMM {
+	if transResidual > h.cfg.Quality.MaxTranslationResidualMM {
 		h.logger.Warnf("handeye: translation residual (%.2fmm) exceeds threshold (%.2fmm)",
-			transResidual, h.cfg.MaxTranslationResidualMM)
+			transResidual, h.cfg.Quality.MaxTranslationResidualMM)
 		failed = append(failed, gateTranslationResidual)
 	}
 
@@ -48,9 +48,9 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 	if !ok {
 		return nil, errors.New("solve result missing quality.rotation_residual_deg")
 	}
-	if rotResidual > h.cfg.MaxRotationResidualDeg {
+	if rotResidual > h.cfg.Quality.MaxRotationResidualDeg {
 		h.logger.Warnf("handeye: rotation residual (%.2f°) exceeds threshold (%.2f°)",
-			rotResidual, h.cfg.MaxRotationResidualDeg)
+			rotResidual, h.cfg.Quality.MaxRotationResidualDeg)
 		failed = append(failed, gateRotationResidual)
 	}
 
@@ -58,23 +58,23 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 	if !ok {
 		return nil, errors.New("solve result missing quality.mean_station_reprojection_px")
 	}
-	if meanReproj > h.cfg.MaxReprojectionErrorPx {
+	if meanReproj > h.cfg.Quality.MaxMeanStationReprojectionPx {
 		h.logger.Warnf(
 			"handeye: mean station reprojection error (%.2f px) exceeds threshold (%.2f px) — detections look inconsistent, check intrinsics/distortion/focus",
-			meanReproj, h.cfg.MaxReprojectionErrorPx,
+			meanReproj, h.cfg.Quality.MaxMeanStationReprojectionPx,
 		)
 		failed = append(failed, gateMeanReprojection)
 	}
 
-	if h.cfg.MaxStationReprojectionErrorPx > 0 {
+	if h.cfg.Quality.MaxStationReprojectionPx > 0 {
 		maxReproj, ok := quality["max_station_reprojection_px"].(float64)
 		if !ok {
 			return nil, errors.New("solve result missing quality.max_station_reprojection_px")
 		}
-		if maxReproj > h.cfg.MaxStationReprojectionErrorPx {
+		if maxReproj > h.cfg.Quality.MaxStationReprojectionPx {
 			h.logger.Warnf(
 				"handeye: max station reprojection error (%.2f px) exceeds threshold (%.2f px) — one or more stations are outliers; mean looks acceptable but a single bad view is contaminating the solve",
-				maxReproj, h.cfg.MaxStationReprojectionErrorPx,
+				maxReproj, h.cfg.Quality.MaxStationReprojectionPx,
 			)
 			failed = append(failed, gateMaxStationReproj)
 		}
