@@ -97,6 +97,11 @@ type Config struct {
 	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 	SaveAllPlans             bool                            `json:"save_all_plans,omitempty"`
+	// AllowedCollisionObstacles names frames the arm is permitted to collide with
+	// during the sweep. Each name must match a frame already in the machine's frame
+	// system (typically an obstacle component). Lets operators keep workcell
+	// obstacles configured for normal operation while still running calibration.
+	AllowedCollisionObstacles []string `json:"allowed_collision_obstacles,omitempty"`
 }
 
 func (cfg *Config) autoApplyEnabled() bool {
@@ -145,6 +150,11 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.SaveSlowPlanThresholdMs < 0 {
 		return nil, nil, fmt.Errorf("save_slow_plan_threshold_ms must be >= 0 (0 uses the default), got %d", cfg.SaveSlowPlanThresholdMs)
+	}
+	for i, name := range cfg.AllowedCollisionObstacles {
+		if name == "" {
+			return nil, nil, fmt.Errorf("allowed_collision_obstacles[%d] is empty; remove the entry or set an obstacle frame name", i)
+		}
 	}
 	return []string{cfg.Arm, cfg.PoseTracker}, nil, nil
 }
@@ -823,6 +833,14 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 		if err := applyJointLimits(h.logger, fs, h.arm.Name().Name, h.cfg.InputRangeOverride); err != nil {
 			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
 		}
+	}
+	for _, name := range h.cfg.AllowedCollisionObstacles {
+		f := fs.Frame(name)
+		if f == nil {
+			return nil, fmt.Errorf("handeye: allowed_collision_obstacles entry %q is not a frame in the current frame system", name)
+		}
+		fs.RemoveFrame(f)
+		h.logger.Infof("handeye: removed obstacle frame %q from planning frame system (allowed_collision_obstacles)", name)
 	}
 	return fs, nil
 }
