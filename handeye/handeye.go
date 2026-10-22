@@ -94,9 +94,7 @@ type Config struct {
 	MaxRotationResidualDeg   float64                         `json:"max_rotation_residual_deg,omitempty"`
 	MinPoseDiversityDeg      float64                         `json:"min_pose_diversity_deg,omitempty"`
 	MaxReprojectionErrorPx   float64                         `json:"max_reprojection_error_px,omitempty"`
-	// MaxStationReprojectionErrorPx gates the single worst per-station
-	// reprojection. 0 disables (default); set to catch runs where one bad
-	// station hides behind an otherwise acceptable mean.
+	// 0 disables the gate (opt-in).
 	MaxStationReprojectionErrorPx float64 `json:"max_station_reprojection_error_px,omitempty"`
 	MaxConsecutiveFailures   int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs  int                             `json:"save_slow_plan_threshold_ms,omitempty"`

@@ -15,41 +15,27 @@ type AxisBounds struct {
 	Max float64 `json:"max"`
 }
 
-// AbsoluteBounds is the arm-base-frame sample region for generated sweep
-// poses, resolved to concrete coordinates. This is the internal
-// representation used after any relative→absolute transform.
 type AbsoluteBounds struct {
 	X AxisBounds `json:"x"`
 	Y AxisBounds `json:"y"`
 	Z AxisBounds `json:"z"`
 }
 
-// WorkspaceBoundsMode selects whether user-provided bounds are interpreted as
-// absolute arm-base coordinates or as offsets around the seed's observed board
-// center. Prefer relative_to_board when the board can move between runs; it
-// stays correct without reconfiguration.
 const (
 	WorkspaceBoundsModeAbsolute        = "absolute"
 	WorkspaceBoundsModeRelativeToBoard = "relative_to_board"
 )
 
-// WorkspaceBounds is the user-facing sampling-region config. Exactly one of
-// Absolute or Relative must be populated, keyed by Mode. Omitting the whole
-// block triggers auto-derivation from the seed board center.
 type WorkspaceBounds struct {
 	Mode     string          `json:"mode"`
 	Absolute *AbsoluteBounds `json:"absolute,omitempty"`
 	Relative *AbsoluteBounds `json:"relative_to_board,omitempty"`
 }
 
-// IsZero reports whether the user omitted workspace_bounds entirely, meaning
-// the module should auto-derive bounds around the observed board.
 func (w WorkspaceBounds) IsZero() bool {
 	return w.Mode == "" && w.Absolute == nil && w.Relative == nil
 }
 
-// validateWorkspaceBounds enforces that Mode matches exactly one payload and
-// that each axis has Min < Max. Caller must have already confirmed non-zero.
 func validateWorkspaceBounds(w WorkspaceBounds) error {
 	switch w.Mode {
 	case WorkspaceBoundsModeAbsolute:
@@ -93,9 +79,7 @@ func validateAxes(path string, b AbsoluteBounds, isAbsolute bool) error {
 	return nil
 }
 
-// Resolve returns the concrete arm-base-frame bounds. For relative_to_board
-// mode, offsets are added to boardCenter. Caller must have validated the
-// config first (Mode set and matching payload non-nil).
+// Resolve assumes validateWorkspaceBounds has run; it does not re-check.
 func (w WorkspaceBounds) Resolve(boardCenter r3.Vector) AbsoluteBounds {
 	switch w.Mode {
 	case WorkspaceBoundsModeRelativeToBoard:
