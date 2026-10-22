@@ -23,9 +23,12 @@ func validCfg() Config {
 		Arm:         "arm",
 		PoseTracker: "tracker",
 		WorkspaceBounds: WorkspaceBounds{
-			X: AxisBounds{Min: -200, Max: 200},
-			Y: AxisBounds{Min: -200, Max: 200},
-			Z: AxisBounds{Min: 100, Max: 500},
+			Mode: WorkspaceBoundsModeAbsolute,
+			Absolute: &AbsoluteBounds{
+				X: AxisBounds{Min: -200, Max: 200},
+				Y: AxisBounds{Min: -200, Max: 200},
+				Z: AxisBounds{Min: 100, Max: 500},
+			},
 		},
 		SettleSeconds: 2.0,
 	}
@@ -40,10 +43,23 @@ func TestConfigValidate(t *testing.T) {
 		{name: "valid", mutate: func(_ *Config) {}, wantErr: ""},
 		{name: "missing arm", mutate: func(c *Config) { c.Arm = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "arm"`},
 		{name: "missing pose_tracker", mutate: func(c *Config) { c.PoseTracker = "" }, wantErr: `Error validating, missing required field. Path: "test" Field: "pose_tracker"`},
-		{name: "workspace_bounds x invalid", mutate: func(c *Config) { c.WorkspaceBounds.X = AxisBounds{Min: 100, Max: 100} }, wantErr: "workspace_bounds.x.min (100) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
-		{name: "workspace_bounds y inverted", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{Min: 200, Max: 100} }, wantErr: "workspace_bounds.y.min (200) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
-		{name: "workspace_bounds partial (only x set)", mutate: func(c *Config) { c.WorkspaceBounds.Y = AxisBounds{}; c.WorkspaceBounds.Z = AxisBounds{} }, wantErr: "workspace_bounds.y.min (0) must be < max (0); to auto-derive, omit the whole workspace_bounds block"},
+		{name: "workspace_bounds absolute x invalid", mutate: func(c *Config) { c.WorkspaceBounds.Absolute.X = AxisBounds{Min: 100, Max: 100} }, wantErr: "workspace_bounds.absolute.x.min (100) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
+		{name: "workspace_bounds absolute y inverted", mutate: func(c *Config) { c.WorkspaceBounds.Absolute.Y = AxisBounds{Min: 200, Max: 100} }, wantErr: "workspace_bounds.absolute.y.min (200) must be < max (100); to auto-derive, omit the whole workspace_bounds block"},
+		{name: "workspace_bounds mode unset", mutate: func(c *Config) { c.WorkspaceBounds.Mode = "" }, wantErr: `workspace_bounds.mode must be "absolute" or "relative_to_board" (to auto-derive, omit the whole workspace_bounds block)`},
+		{name: "workspace_bounds mode mismatch", mutate: func(c *Config) {
+			c.WorkspaceBounds.Mode = WorkspaceBoundsModeRelativeToBoard
+		}, wantErr: `workspace_bounds.mode is "relative_to_board" but workspace_bounds.relative_to_board is missing`},
 		{name: "workspace_bounds fully omitted validates ok", mutate: func(c *Config) { c.WorkspaceBounds = WorkspaceBounds{} }, wantErr: ""},
+		{name: "workspace_bounds relative_to_board ok", mutate: func(c *Config) {
+			c.WorkspaceBounds = WorkspaceBounds{
+				Mode: WorkspaceBoundsModeRelativeToBoard,
+				Relative: &AbsoluteBounds{
+					X: AxisBounds{Min: -300, Max: 300},
+					Y: AxisBounds{Min: -300, Max: 300},
+					Z: AxisBounds{Min: 450, Max: 800},
+				},
+			}
+		}, wantErr: ""},
 		{name: "settle_seconds unset defaults to 2", mutate: func(c *Config) { c.SettleSeconds = 0 }, wantErr: ""},
 		{name: "settle_seconds negative", mutate: func(c *Config) { c.SettleSeconds = -1 }, wantErr: "settle_seconds must be >= 0 (0 uses the default), got -1"},
 		{name: "max_reprojection_error_px negative", mutate: func(c *Config) { c.MaxReprojectionErrorPx = -1 }, wantErr: "max_reprojection_error_px must be >= 0 (0 uses the default), got -1"},

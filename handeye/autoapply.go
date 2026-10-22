@@ -15,6 +15,7 @@ const (
 	gateRotationResidual    = "rotation_residual"
 	gatePoseDiversity       = "pose_diversity"
 	gateMeanReprojection    = "mean_reprojection"
+	gateMaxStationReproj    = "max_station_reprojection"
 )
 
 // Non-nil error = malformed solver output (run failure, not quality failure).
@@ -63,6 +64,20 @@ func (h *handeye) evaluateQualityGates(quality map[string]interface{}) ([]string
 			meanReproj, h.cfg.MaxReprojectionErrorPx,
 		)
 		failed = append(failed, gateMeanReprojection)
+	}
+
+	if h.cfg.MaxStationReprojectionErrorPx > 0 {
+		maxReproj, ok := quality["max_station_reprojection_px"].(float64)
+		if !ok {
+			return nil, errors.New("solve result missing quality.max_station_reprojection_px")
+		}
+		if maxReproj > h.cfg.MaxStationReprojectionErrorPx {
+			h.logger.Warnf(
+				"handeye: max station reprojection error (%.2f px) exceeds threshold (%.2f px) — one or more stations are outliers; mean looks acceptable but a single bad view is contaminating the solve",
+				maxReproj, h.cfg.MaxStationReprojectionErrorPx,
+			)
+			failed = append(failed, gateMaxStationReproj)
+		}
 	}
 
 	return failed, nil
