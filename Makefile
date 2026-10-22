@@ -1,7 +1,7 @@
 BINARY := camera-calibration
 BIN_DIR := bin
 
-.PHONY: setup system-deps venv build lint check-lint test python-test module.tar.gz clean
+.PHONY: setup system-deps venv build build-cli lint check-lint test python-test module.tar.gz clean
 
 default: module.tar.gz
 
@@ -18,6 +18,11 @@ build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/$(BINARY) ./cmd/module
 	@echo "Binary: $(BIN_DIR)/$(BINARY)"
+
+build-cli:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/$(BINARY)-cli ./cli
+	@echo "Binary: $(BIN_DIR)/$(BINARY)-cli"
 
 lint:
 	golangci-lint run --fix ./...

@@ -250,6 +250,7 @@ States: `ready | capturing | solving | applying | complete | failed`.
 
 - **Nonsense reprojection error on Realsense or Orbbec cameras**: set `"image_source": "color"` on the charuco tracker attributes. Without it, the module may grab the depth stream by default, producing garbage detections.
 - **Execution failure during a sweep**: the failing plan request, trajectory, and arm position are saved to the machine's capture dir under `tag=camera-calibration-<timestamp>/` for offline debugging.
+- **A per-station reprojection outlier dragged the solve**: set `save_capture_images: true` on the handeye service to write per-station images + sidecar JSON (pose, reprojection error, timestamp) to the capture dir, tagged by pass ID. Pull them locally with the [`camera-calibration-cli`](./cli/README.md) and inspect the worst station's image to see what the detector saw.
 
 ## Not Supported
 
