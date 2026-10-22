@@ -95,6 +95,8 @@ type Config struct {
 	SaveSlowPlanThresholdMs int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 	SaveAllPlans            bool                            `json:"save_all_plans,omitempty"`
 	SaveCaptureImages       bool                            `json:"save_capture_images,omitempty"`
+	MinPosesForEarlyStop    int                             `json:"min_poses_for_early_stop,omitempty"`
+	MaxPoses                int                             `json:"max_poses,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell
@@ -154,6 +156,15 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.SaveSlowPlanThresholdMs < 0 {
 		return nil, nil, fmt.Errorf("save_slow_plan_threshold_ms must be >= 0 (0 uses the default), got %d", cfg.SaveSlowPlanThresholdMs)
 	}
+	if cfg.MinPosesForEarlyStop < 0 {
+		return nil, nil, fmt.Errorf("min_poses_for_early_stop must be >= 0 (0 uses the default), got %d", cfg.MinPosesForEarlyStop)
+	}
+	if cfg.MaxPoses < 0 {
+		return nil, nil, fmt.Errorf("max_poses must be >= 0 (0 uses the default), got %d", cfg.MaxPoses)
+	}
+	if cfg.MaxPoses > 0 && cfg.MinPosesForEarlyStop > cfg.MaxPoses {
+		return nil, nil, fmt.Errorf("min_poses_for_early_stop (%d) must be <= max_poses (%d)", cfg.MinPosesForEarlyStop, cfg.MaxPoses)
+	}
 	for i, name := range cfg.AllowedCollisionObstacles {
 		if name == "" {
 			return nil, nil, fmt.Errorf("allowed_collision_obstacles[%d] is empty; remove the entry or set an obstacle frame name", i)
@@ -169,11 +180,8 @@ const (
 	defaultMaxMeanStationReprojectionPx = 2.0
 	defaultMaxConsecutiveFailures       = 200
 	defaultSaveSlowPlanThresholdMs      = 1500
-
-	// start checking calibration quality after this many captures; stop as soon as it passes
-	minPosesForEarlyStop = 15
-	// hard cap so a stubbornly-failing run gives up instead of spinning forever
-	maxPoses = 40
+	defaultMinPosesForEarlyStop         = 15
+	defaultMaxPoses                     = 40
 )
 
 type handeye struct {
@@ -242,6 +250,12 @@ func newHandeye(
 	}
 	if cfg.SaveSlowPlanThresholdMs == 0 {
 		cfg.SaveSlowPlanThresholdMs = defaultSaveSlowPlanThresholdMs
+	}
+	if cfg.MinPosesForEarlyStop == 0 {
+		cfg.MinPosesForEarlyStop = defaultMinPosesForEarlyStop
+	}
+	if cfg.MaxPoses == 0 {
+		cfg.MaxPoses = defaultMaxPoses
 	}
 	a, err := arm.FromProvider(deps, cfg.Arm)
 	if err != nil {
@@ -460,14 +474,14 @@ func (h *handeye) runCalibration(ctx context.Context) {
 	}
 
 	pool := &posePool{}
-	for pool.len() < maxPoses {
+	for pool.len() < h.cfg.MaxPoses {
 		pool.add(generateFiltered())
 	}
 	const poolRefillThreshold = 5
 	var captured []spatialmath.Pose
 	nextPose := func() (spatialmath.Pose, error) {
 		if pool.len() < poolRefillThreshold {
-			for i := 0; i < maxPoses/2; i++ {
+			for i := 0; i < h.cfg.MaxPoses/2; i++ {
 				pool.add(generateFiltered())
 			}
 		}
@@ -481,7 +495,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 
 	var earlyStopResult map[string]interface{}
 	shouldStop := func(stations []map[string]interface{}) bool {
-		if len(stations) < minPosesForEarlyStop {
+		if len(stations) < h.cfg.MinPosesForEarlyStop {
 			return false
 		}
 		result, serr := h.runSolver(ctx, stations)
@@ -507,7 +521,7 @@ func (h *handeye) runCalibration(ctx context.Context) {
 		return true
 	}
 
-	stations, err := h.sweepAndCapture(ctx, maxPoses, nextPose, onCaptured, shouldStop)
+	stations, err := h.sweepAndCapture(ctx, h.cfg.MaxPoses, nextPose, onCaptured, shouldStop)
 	if visParams != nil {
 		h.logger.Infof("handeye: visibility pre-filter rejected %d candidate poses before planning", prefilterRejections)
 	}

@@ -145,6 +145,8 @@ Both models take the same attributes.
 | `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Supersedes `save_slow_plan_threshold_ms`. |
 | `save_capture_images`         | No       | `false` | If `true`, save the raw image + a per-station JSON (pose + reprojection error) to the capture dir for every successfully-detected station. Opt-in because images per calibration run add up fast on disk. Use for debugging a per-station reprojection outlier (look for the station whose JSON shows the high error; the sibling image is what the solver saw). |
 | `allowed_collision_obstacles` | No       | `[]`    | Frame names (typically obstacle components) to drop from the planning frame system for this calibration run only. Lets you keep workcell obstacles configured for normal operation without disabling them to calibrate. Each name must exist in the current frame system. |
+| `min_poses_for_early_stop`    | No       | 15      | Minimum number of captured stations before the sweep is allowed to early-stop on gate pass. Raise to force more averaging on noisy setups. |
+| `max_poses`                   | No       | 40      | Hard cap on captured stations in a sweep. Raise alongside `min_poses_for_early_stop` if you want more captures with headroom. |
 
 #### `workspace_bounds`
 
