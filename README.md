@@ -139,7 +139,7 @@ Both models take the same attributes.
 | `input_range_override`        | No       | —       | Tighten arm joint limits (radians). Keys are joint indices (`"0"`, `"1"`, ...) or joint names; values are `{"Min": ..., "Max": ...}`. Applied to the arm named in `arm`. |
 | `auto_apply_result`           | No       | `true`  | Write the calibrated frame back to the camera's config. Set to `false` to skip the write and inspect the result manually. |
 | `target_camera`               | No       | derived | Override which camera's `frame` block gets updated.                           |
-| `quality`                     | No       | —       | Auto-apply gates on the solve result (see below).                             |
+| `quality`                     | No       | —       | Thresholds that drive early-stop and gate auto-apply (see below).             |
 | `max_consecutive_failures`    | No       | 200     | Bail out of the sweep if this many attempts in a row fail (unreachable pose, board not detected). Any successful capture resets the counter. |
 | `save_slow_plan_threshold_ms` | No       | 1500    | If a plan's planning duration exceeds this (in ms), save the `PlanRequest` to the capture dir for offline debugging. |
 | `save_all_plans`              | No       | `false` | If `true`, save every `PlanRequest` to the capture dir regardless of speed. Supersedes `save_slow_plan_threshold_ms`. |
@@ -177,7 +177,7 @@ Pick a mode. Omit the whole block to auto-derive bounds around the observed boar
 
 #### `quality`
 
-Thresholds the solve result must clear for auto-apply. Field names mirror the metric names emitted in the DoCommand result's `quality` block. Omit the whole block (or any individual field) to use defaults.
+Thresholds the solve must clear. The sweep keeps capturing stations and re-solving until every gate passes, stopping early as soon as they do (or giving up at the hard pose cap). Separately, the final solve is auto-applied only if every gate passed. Field names mirror the metric names emitted in the DoCommand result's `quality` block; omit the whole block or any field to use defaults.
 
 ```json
 "quality": {
