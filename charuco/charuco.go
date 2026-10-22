@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/erh/vmodutils/file_utils"
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/posetracker"
@@ -221,7 +222,8 @@ func (c *charuco) DoCommand(ctx context.Context, cmd map[string]interface{}) (ma
 	}
 	switch v {
 	case "detect":
-		return c.detectViaCommand(ctx)
+		args, _ := cmd["detect"].(map[string]interface{})
+		return c.detectViaCommand(ctx, args)
 	case "visibility_params":
 		return c.visibilityParams(ctx)
 	case "camera":
@@ -251,8 +253,8 @@ func (c *charuco) visibilityParams(ctx context.Context) (map[string]interface{},
 	}, nil
 }
 
-func (c *charuco) detectViaCommand(ctx context.Context) (map[string]interface{}, error) {
-	stdout, err := c.captureAndDetect(ctx)
+func (c *charuco) detectViaCommand(ctx context.Context, args map[string]interface{}) (map[string]interface{}, error) {
+	imgBytes, mimeType, stdout, err := c.captureAndDetectCapturingImage(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +262,58 @@ func (c *charuco) detectViaCommand(ctx context.Context) (map[string]interface{},
 	if err := json.Unmarshal(stdout, &result); err != nil {
 		return nil, fmt.Errorf("charuco: parse detect.py output: %w", err)
 	}
+	if savedPath, ok := c.maybeSaveImage(args, imgBytes, mimeType); ok {
+		result["saved_image_path"] = savedPath
+	}
 	return result, nil
+}
+
+// Save failures are logged, not propagated — a bad save path must not sink detection.
+func (c *charuco) maybeSaveImage(args map[string]interface{}, imgBytes []byte, mimeType string) (string, bool) {
+	save, _ := args["save_image"].(bool)
+	if !save {
+		return "", false
+	}
+	passID, _ := args["pass_id"].(string)
+	if passID == "" {
+		c.logger.Warn("charuco: save_image set but pass_id missing; skipping save")
+		return "", false
+	}
+	var stationID int
+	switch v := args["station_id"].(type) {
+	case int:
+		stationID = v
+	case float64:
+		stationID = int(v)
+	}
+	if stationID <= 0 {
+		c.logger.Warn("charuco: save_image set but station_id missing/invalid; skipping save")
+		return "", false
+	}
+	saveDir := file_utils.GetPathInCaptureDir(fmt.Sprintf("tag=%s", passID))
+	if err := file_utils.EnsureDir(saveDir); err != nil {
+		c.logger.Warnf("charuco: ensure save dir %q: %v", saveDir, err)
+		return "", false
+	}
+	filename := fmt.Sprintf("station-%02d%s", stationID, extensionFromMimeType(mimeType))
+	fullPath := filepath.Join(saveDir, filename)
+	if err := os.WriteFile(fullPath, imgBytes, 0o600); err != nil {
+		c.logger.Warnf("charuco: write image to %q: %v", fullPath, err)
+		return "", false
+	}
+	c.logger.Infof("charuco: saved station %d image to %s (%d bytes)", stationID, fullPath, len(imgBytes))
+	return fullPath, true
+}
+
+func extensionFromMimeType(mime string) string {
+	switch mime {
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	default:
+		return ".image"
+	}
 }
 
 func (c *charuco) captureAndParse(ctx context.Context) (*detectResponse, error) {
@@ -276,9 +329,14 @@ func (c *charuco) captureAndParse(ctx context.Context) (*detectResponse, error) 
 }
 
 func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
+	_, _, stdout, err := c.captureAndDetectCapturingImage(ctx)
+	return stdout, err
+}
+
+func (c *charuco) captureAndDetectCapturingImage(ctx context.Context) (imgBytes []byte, mimeType string, stdout []byte, err error) {
 	intrinsicsJSON, err := c.intrinsicsJSON(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
 
 	var filter []string
@@ -287,31 +345,32 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 	}
 	images, _, err := c.camera.Images(ctx, filter, nil)
 	if err != nil {
-		return nil, fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
+		return nil, "", nil, fmt.Errorf("charuco: camera %q not responding: %w", c.cfg.Camera, err)
 	}
 	if len(images) == 0 {
-		return nil, errors.New("charuco: camera returned no images")
+		return nil, "", nil, errors.New("charuco: camera returned no images")
 	}
-	imgBytes, err := images[0].Bytes(ctx)
+	imgBytes, err = images[0].Bytes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("charuco: get image bytes: %w", err)
+		return nil, "", nil, fmt.Errorf("charuco: get image bytes: %w", err)
 	}
+	mimeType = images[0].MimeType()
 
 	tmpFile, err := os.CreateTemp("", "charuco-*.img")
 	if err != nil {
-		return nil, fmt.Errorf("charuco: create temp file: %w", err)
+		return nil, "", nil, fmt.Errorf("charuco: create temp file: %w", err)
 	}
 	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-	if _, err := tmpFile.Write(imgBytes); err != nil {
+	if _, werr := tmpFile.Write(imgBytes); werr != nil {
 		_ = tmpFile.Close()
-		return nil, fmt.Errorf("charuco: write temp file: %w", err)
+		return nil, "", nil, fmt.Errorf("charuco: write temp file: %w", werr)
 	}
-	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("charuco: close temp file: %w", err)
+	if cerr := tmpFile.Close(); cerr != nil {
+		return nil, "", nil, fmt.Errorf("charuco: close temp file: %w", cerr)
 	}
 
-	return pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,
+	stdout, err = pyrunner.Run(ctx, c.logger, c.pythonBin, c.scriptPath,
 		tmpFile.Name(),
 		c.cfg.Dictionary,
 		strconv.Itoa(c.cfg.SquaresX),
@@ -320,6 +379,7 @@ func (c *charuco) captureAndDetect(ctx context.Context) ([]byte, error) {
 		strconv.FormatFloat(c.cfg.MarkerLengthMM, 'f', -1, 64),
 		intrinsicsJSON,
 	)
+	return imgBytes, mimeType, stdout, err
 }
 
 // RDK order [k1, k2, k3, p1, p2] -> OpenCV order [k1, k2, p1, p2, k3].

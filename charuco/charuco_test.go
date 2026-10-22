@@ -204,3 +204,37 @@ func TestReorderRDKToOpenCVDistortion_EmptyPassesThrough(t *testing.T) {
 	got := reorderRDKToOpenCVDistortion("", []float64{}, logger)
 	test.That(t, got, test.ShouldBeEmpty)
 }
+
+func TestExtensionFromMimeType(t *testing.T) {
+	tests := []struct {
+		mime string
+		want string
+	}{
+		{"image/jpeg", ".jpg"},
+		{"image/jpg", ".jpg"},
+		{"image/png", ".png"},
+		{"", ".image"},
+		{"application/octet-stream", ".image"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mime, func(t *testing.T) {
+			test.That(t, extensionFromMimeType(tt.mime), test.ShouldEqual, tt.want)
+		})
+	}
+}
+
+func TestMaybeSaveImageNoop(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	c := &charuco{logger: logger}
+	// save_image not set → no save, no error.
+	_, ok := c.maybeSaveImage(nil, []byte("payload"), "image/jpeg")
+	test.That(t, ok, test.ShouldBeFalse)
+	_, ok = c.maybeSaveImage(map[string]interface{}{"save_image": false}, []byte("payload"), "image/jpeg")
+	test.That(t, ok, test.ShouldBeFalse)
+	// save_image true but missing pass_id → warned and skipped.
+	_, ok = c.maybeSaveImage(map[string]interface{}{"save_image": true, "station_id": 1}, []byte("payload"), "image/jpeg")
+	test.That(t, ok, test.ShouldBeFalse)
+	// save_image true but missing station_id → warned and skipped.
+	_, ok = c.maybeSaveImage(map[string]interface{}{"save_image": true, "pass_id": "x"}, []byte("payload"), "image/jpeg")
+	test.That(t, ok, test.ShouldBeFalse)
+}

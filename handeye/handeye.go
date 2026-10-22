@@ -94,6 +94,7 @@ type Config struct {
 	MaxConsecutiveFailures  int                             `json:"max_consecutive_failures,omitempty"`
 	SaveSlowPlanThresholdMs int                             `json:"save_slow_plan_threshold_ms,omitempty"`
 	SaveAllPlans            bool                            `json:"save_all_plans,omitempty"`
+	SaveCaptureImages       bool                            `json:"save_capture_images,omitempty"`
 	// AllowedCollisionObstacles names frames the arm is permitted to collide with
 	// during the sweep. Each name must match a frame already in the machine's frame
 	// system (typically an obstacle component). Lets operators keep workcell
@@ -795,7 +796,14 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 		case <-time.After(settleDur):
 		}
 
-		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": map[string]interface{}{}})
+		stationID := len(stations) + 1
+		detectArgs := map[string]interface{}{}
+		if h.cfg.SaveCaptureImages {
+			detectArgs["save_image"] = true
+			detectArgs["pass_id"] = passID
+			detectArgs["station_id"] = stationID
+		}
+		detectResp, err := h.tracker.DoCommand(ctx, map[string]interface{}{"detect": detectArgs})
 		if err != nil {
 			return nil, fmt.Errorf("handeye: attempt %d halted: %w", attempt, err)
 		}
@@ -819,6 +827,10 @@ func (h *handeye) sweepAndCapture(ctx context.Context, targetCount int, nextPose
 			"T_cw":                  poseToJSON(boardInCamera),
 			"reprojection_error_px": reprojErr,
 		})
+		if h.cfg.SaveCaptureImages {
+			savedImagePath, _ := detectResp["saved_image_path"].(string)
+			h.saveStationMetadata(passID, stationID, actualEndPose, boardInCamera, reprojErr, savedImagePath)
+		}
 		consecutiveFailures = 0
 		onCaptured(actualEndPose)
 		h.mu.Lock()
@@ -919,6 +931,28 @@ func (h *handeye) maybeSavePlanRequest(ctx context.Context, passID string, req *
 	sf := fileio.NewPlanRequestSaveFile(fileio.NewPlanRequestForSaving(req), passID, filename, time.Now(), planDur)
 	h.fileSaver.SaveAsync(ctx, sf)
 	h.logger.Infof("handeye: saved plan request (planning=%dms) pass=%s file=%s", planDur.Milliseconds(), passID, filename)
+}
+
+// Save failures are logged, not propagated — a bad save path must not sink the calibration.
+func (h *handeye) saveStationMetadata(passID string, stationID int, armEndPose, boardInCamera spatialmath.Pose, reprojErr float64, imagePath string) {
+	saveDir := file_utils.GetPathInCaptureDir(fmt.Sprintf("tag=%s", passID))
+	if err := file_utils.EnsureDir(saveDir); err != nil {
+		h.logger.Warnf("handeye: ensure station-metadata dir %q: %v", saveDir, err)
+		return
+	}
+	meta := map[string]interface{}{
+		"station_id":            stationID,
+		"pass_id":               passID,
+		"captured_at":           time.Now().Format(time.RFC3339),
+		"arm_end_pose":          poseToJSON(armEndPose),
+		"board_in_camera":       poseToJSON(boardInCamera),
+		"reprojection_error_px": reprojErr,
+		"saved_image_path":      imagePath,
+	}
+	filename := fmt.Sprintf("station-%02d.json", stationID)
+	if err := file_utils.SaveJsonFile(meta, saveDir, filename, time.Now()); err != nil {
+		h.logger.Warnf("handeye: save station metadata %q: %v", filename, err)
+	}
 }
 
 func (h *handeye) saveFailureArtifacts(ctx context.Context, passID string, req *armplanning.PlanRequest, trajectory [][]referenceframe.Input, planDur time.Duration) {
