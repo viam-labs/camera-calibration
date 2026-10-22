@@ -12,6 +12,7 @@ import (
 var (
 	debug         bool
 	downloadFlags DownloadFlags
+	solveFlags    SolveFlags
 	rootCmd       = &cobra.Command{
 		Use:   "camera-calibration-cli",
 		Short: "CLI for inspecting camera-calibration runs by pass ID",
@@ -21,12 +22,26 @@ var (
 		Short: "Download station images + sidecar JSON for a pass ID into a local folder",
 		Run:   runDownload,
 	}
+	solveCmd = &cobra.Command{
+		Use:   "solve",
+		Short: "Re-run the hand-eye solver locally against a downloaded pass's sidecars",
+		Run:   runSolve,
+	}
 )
 
 type DownloadFlags struct {
 	PassID             string
 	DownloadsDirectory string
 	OrgID              string
+}
+
+type SolveFlags struct {
+	PassID             string
+	DownloadsDirectory string
+	Method             string
+	CalibrationType    string
+	PythonBin          string
+	SolveScript        string
 }
 
 func init() {
@@ -37,6 +52,15 @@ func init() {
 	downloadCmd.Flags().StringVar(&downloadFlags.OrgID, "org-id", "", "optional Viam org id to skip auto-discovery")
 	_ = downloadCmd.MarkFlagRequired("pass-id")
 	rootCmd.AddCommand(downloadCmd)
+
+	solveCmd.Flags().StringVar(&solveFlags.PassID, "pass-id", "", "pass ID to replay (required)")
+	solveCmd.Flags().StringVar(&solveFlags.DownloadsDirectory, "downloads-dir", "./downloads", "local folder holding the pass dir (as written by `download`)")
+	solveCmd.Flags().StringVar(&solveFlags.Method, "method", "tsai", "solver method: tsai, park, horaud, andreff, daniilidis")
+	solveCmd.Flags().StringVar(&solveFlags.CalibrationType, "calibration-type", "", "override calibration_type (eye_in_hand or eye_to_hand); default is inferred from sidecars")
+	solveCmd.Flags().StringVar(&solveFlags.PythonBin, "python-bin", ".venv/bin/python", "python interpreter to invoke")
+	solveCmd.Flags().StringVar(&solveFlags.SolveScript, "solve-script", "python/solve.py", "path to solve.py relative to CWD")
+	_ = solveCmd.MarkFlagRequired("pass-id")
+	rootCmd.AddCommand(solveCmd)
 }
 
 func main() {

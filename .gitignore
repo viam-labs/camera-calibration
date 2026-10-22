@@ -19,6 +19,9 @@ docs
 bin
 *.exe
 
+# camera-calibration-cli local downloads
+downloads
+
 # packaged module
 module.tar.gz
 
