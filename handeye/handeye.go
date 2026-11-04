@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -864,7 +865,7 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 		return nil, fmt.Errorf("handeye: build frame system: %w", err)
 	}
 	if len(h.cfg.InputRangeOverride) > 0 {
-		if err := applyJointLimits(h.logger, fs, h.arm.Name().Name, h.cfg.InputRangeOverride); err != nil {
+		if err = applyJointLimits(h.logger, fs, h.arm.Name().Name, h.cfg.InputRangeOverride); err != nil {
 			return nil, fmt.Errorf("handeye: apply input_range_override: %w", err)
 		}
 	}
@@ -876,7 +877,44 @@ func (h *handeye) buildFrameSystem(ctx context.Context) (*referenceframe.FrameSy
 		fs.RemoveFrame(f)
 		h.logger.Infof("handeye: removed obstacle frame %q from planning frame system (allowed_collision_obstacles)", name)
 	}
+	inputs, err := h.fsService.CurrentInputs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("handeye: get frame system inputs: %w", err)
+	}
+	if err := freezeNonArmFrames(h.logger, fs, h.arm.Name().Name, inputs); err != nil {
+		return nil, fmt.Errorf("handeye: freeze non-arm frames: %w", err)
+	}
 	return fs, nil
+}
+
+// freezeNonArmFrames replaces every movable frame other than the arm with a static frame at its
+// current pose. Only the arm is commanded, so a plan that moves any other frame (e.g. a gantry the
+// arm rides on) would execute arm joints solved for a pose that never happens. Pinning via the
+// motion chain alone is not enough: armplanning still nudges out-of-chain frames to clear collisions.
+func freezeNonArmFrames(logger logging.Logger, fs *referenceframe.FrameSystem, armName string, inputs referenceframe.FrameSystemInputs) error {
+	for name, in := range inputs {
+		f := fs.Frame(name)
+		if name == armName || f == nil || len(f.DoF()) == 0 {
+			continue
+		}
+		pose, err := f.Transform(in)
+		if err != nil {
+			return fmt.Errorf("%q: %w", name, err)
+		}
+		geoms, err := f.Geometries(in)
+		if err != nil {
+			return fmt.Errorf("%q geometries: %w", name, err)
+		}
+		static, err := referenceframe.NewStaticFrameWithGeometries(name, pose, geoms.Geometries())
+		if err != nil {
+			return fmt.Errorf("%q: %w", name, err)
+		}
+		if err := fs.ReplaceFrame(static); err != nil {
+			return fmt.Errorf("%q: %w", name, err)
+		}
+		logger.Infof("handeye: holding frame %q at %v for planning; only the arm moves during calibration", name, in)
+	}
+	return nil
 }
 
 func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSystem, target spatialmath.Pose, passID string) (planDur time.Duration, planErr, execErr error) {
@@ -885,8 +923,10 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	if err != nil {
 		return 0, fmt.Errorf("get frame system inputs: %w", err), nil
 	}
-	for _, name := range h.cfg.AllowedCollisionObstacles {
-		delete(fsInputs, name)
+	for name := range fsInputs {
+		if f := fs.Frame(name); f == nil || len(f.DoF()) == 0 {
+			delete(fsInputs, name)
+		}
 	}
 
 	startState := armplanning.NewPlanState(nil, fsInputs)
@@ -908,8 +948,13 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	h.maybeSavePlanRequest(ctx, passID, req, planDur)
 
 	trajectory := make([][]referenceframe.Input, 0, len(plan.Trajectory()))
-	for _, fsInputs := range plan.Trajectory() {
-		armInputs, err := fsInputs.GetFrameInputs(fs.Frame(armName))
+	for _, step := range plan.Trajectory() {
+		for name, in := range step {
+			if name != armName && !slices.Equal(in, fsInputs[name]) {
+				return planDur, nil, fmt.Errorf("plan moves frame %q, but only arm %q is executed", name, armName)
+			}
+		}
+		armInputs, err := step.GetFrameInputs(fs.Frame(armName))
 		if err != nil {
 			return planDur, fmt.Errorf("extract arm inputs from trajectory: %w", err), nil
 		}
