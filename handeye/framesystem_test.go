@@ -74,8 +74,8 @@ func TestBuildFrameSystemAppliesInputRangeOverride(t *testing.T) {
 
 const gantryTestGeomLabel = "rail"
 
-// gantryCell is world → gantry-1 (prismatic +x, 0–3000 mm, at x=0) → arm (UR5e).
-func gantryCell(t *testing.T) (*handeye, *[][]referenceframe.Input) {
+// gantryCell is world → gantry-1 (prismatic +x, 0–3000 mm, at gantryX) → arm (UR5e).
+func gantryCell(t *testing.T, gantryX float64) (*handeye, *[][]referenceframe.Input) {
 	t.Helper()
 	rail, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 1500, Z: -100}), r3.Vector{X: 3200, Y: 200, Z: 50}, gantryTestGeomLabel)
 	test.That(t, err, test.ShouldBeNil)
@@ -95,7 +95,7 @@ func gantryCell(t *testing.T) (*handeye, *[][]referenceframe.Input) {
 	}
 	fsSvc.CurrentInputsFunc = func(_ context.Context) (referenceframe.FrameSystemInputs, error) {
 		return referenceframe.FrameSystemInputs{
-			"gantry-1": {0},
+			"gantry-1": {referenceframe.Input(gantryX)},
 			"arm":      {0, -math.Pi / 2, math.Pi / 2, -math.Pi / 2, -math.Pi / 2, 0},
 		}, nil
 	}
@@ -115,7 +115,7 @@ func gantryCell(t *testing.T) (*handeye, *[][]referenceframe.Input) {
 }
 
 func TestPlanAndExecuteCannotUseGantryToReachTarget(t *testing.T) {
-	h, executed := gantryCell(t)
+	h, executed := gantryCell(t, 0)
 	fs, err := h.buildFrameSystem(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 
@@ -128,7 +128,7 @@ func TestPlanAndExecuteCannotUseGantryToReachTarget(t *testing.T) {
 }
 
 func TestPlanAndExecuteReachesTargetWithGantryFixed(t *testing.T) {
-	h, executed := gantryCell(t)
+	h, executed := gantryCell(t, 0)
 	fs, err := h.buildFrameSystem(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 
@@ -149,7 +149,7 @@ func TestPlanAndExecuteReachesTargetWithGantryFixed(t *testing.T) {
 }
 
 func TestFreezeNonArmFramesKeepsGantryGeometryInPlace(t *testing.T) {
-	h, _ := gantryCell(t)
+	h, _ := gantryCell(t, 1000)
 	inputs, err := h.fsService.CurrentInputs(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 	raw, err := framesystem.NewFromService(context.Background(), h.fsService, nil)
@@ -176,10 +176,11 @@ func TestFreezeNonArmFramesKeepsGantryGeometryInPlace(t *testing.T) {
 		return nil
 	}
 	test.That(t, spatialmath.PoseAlmostEqual(world(before), world(after)), test.ShouldBeTrue)
+	test.That(t, world(after).Point().X, test.ShouldAlmostEqual, 2500)
 }
 
 func TestPlanAndExecuteRejectsPlanThatMovesNonArmFrame(t *testing.T) {
-	h, executed := gantryCell(t)
+	h, executed := gantryCell(t, 0)
 	unfrozen, err := framesystem.NewFromService(context.Background(), h.fsService, nil)
 	test.That(t, err, test.ShouldBeNil)
 
