@@ -130,6 +130,8 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 
 Both models take the same attributes.
 
+Only `arm` moves. Any other movable frame, such as a gantry the arm rides on, is held at its current position for the whole sweep, so park it where the board is within the arm's reach before running `calibrate`.
+
 | Field                         | Required | Default | Description                                                                   |
 | ----------------------------- | -------- | ------- | ----------------------------------------------------------------------------- |
 | `arm`                         | Yes      | —       | Name of the arm.                                                              |
