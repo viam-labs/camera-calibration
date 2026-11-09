@@ -943,9 +943,11 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 	plan, _, err := armplanning.PlanMotion(ctx, h.logger, req)
 	planDur = time.Since(planStart)
 	if err != nil {
+		// A cancelled sweep is the common way a long plan ends, and SaveAsync drops saves on a dead ctx.
+		h.maybeSavePlanRequest(context.WithoutCancel(ctx), passID, req, planDur, true)
 		return planDur, fmt.Errorf("plan motion: %w", err), nil
 	}
-	h.maybeSavePlanRequest(ctx, passID, req, planDur)
+	h.maybeSavePlanRequest(ctx, passID, req, planDur, false)
 
 	trajectory := make([][]referenceframe.Input, 0, len(plan.Trajectory()))
 	for _, step := range plan.Trajectory() {
@@ -970,20 +972,25 @@ func (h *handeye) planAndExecute(ctx context.Context, fs *referenceframe.FrameSy
 
 // planSaveFilename returns the file to save a PlanRequest under, or ok=false
 // if no save trigger fires. SaveAllPlans supersedes the slow-plan threshold
-// to avoid double-saving.
-func planSaveFilename(cfg *Config, planDur time.Duration) (string, bool) {
+// to avoid double-saving. Failed plans get a distinct prefix so they can be
+// told apart from slow-but-successful ones in the capture dir.
+func planSaveFilename(cfg *Config, planDur time.Duration, failed bool) (string, bool) {
+	prefix := "capture"
+	if failed {
+		prefix = "capture_failed"
+	}
 	switch {
 	case cfg.SaveAllPlans:
-		return "capture_plan_request.json", true
+		return prefix + "_plan_request.json", true
 	case planDur.Milliseconds() > int64(cfg.SaveSlowPlanThresholdMs):
-		return fmt.Sprintf("capture_slow_%dms_plan_request.json", planDur.Milliseconds()), true
+		return fmt.Sprintf("%s_slow_%dms_plan_request.json", prefix, planDur.Milliseconds()), true
 	default:
 		return "", false
 	}
 }
 
-func (h *handeye) maybeSavePlanRequest(ctx context.Context, passID string, req *armplanning.PlanRequest, planDur time.Duration) {
-	filename, ok := planSaveFilename(h.cfg, planDur)
+func (h *handeye) maybeSavePlanRequest(ctx context.Context, passID string, req *armplanning.PlanRequest, planDur time.Duration, failed bool) {
+	filename, ok := planSaveFilename(h.cfg, planDur, failed)
 	if !ok {
 		return
 	}

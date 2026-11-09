@@ -563,18 +563,21 @@ func TestPlanSaveFilename(t *testing.T) {
 		name     string
 		cfg      Config
 		planDur  time.Duration
+		failed   bool
 		wantFile string
 		wantOk   bool
 	}{
-		{"save_all wins over slow", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 3000 * time.Millisecond, "capture_plan_request.json", true},
-		{"slow fires above threshold", Config{SaveSlowPlanThresholdMs: 1500}, 1800 * time.Millisecond, "capture_slow_1800ms_plan_request.json", true},
-		{"fast plan skipped", Config{SaveSlowPlanThresholdMs: 1500}, 50 * time.Millisecond, "", false},
-		{"threshold equal skipped", Config{SaveSlowPlanThresholdMs: 1500}, 1500 * time.Millisecond, "", false},
-		{"save_all with fast plan still saves", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 10 * time.Millisecond, "capture_plan_request.json", true},
+		{"save_all wins over slow", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 3000 * time.Millisecond, false, "capture_plan_request.json", true},
+		{"slow fires above threshold", Config{SaveSlowPlanThresholdMs: 1500}, 1800 * time.Millisecond, false, "capture_slow_1800ms_plan_request.json", true},
+		{"fast plan skipped", Config{SaveSlowPlanThresholdMs: 1500}, 50 * time.Millisecond, false, "", false},
+		{"threshold equal skipped", Config{SaveSlowPlanThresholdMs: 1500}, 1500 * time.Millisecond, false, "", false},
+		{"save_all with fast plan still saves", Config{SaveAllPlans: true, SaveSlowPlanThresholdMs: 1500}, 10 * time.Millisecond, false, "capture_plan_request.json", true},
+		{"slow failed plan saved", Config{SaveSlowPlanThresholdMs: 1500}, 220505 * time.Millisecond, true, "capture_failed_slow_220505ms_plan_request.json", true},
+		{"fast failed plan skipped", Config{SaveSlowPlanThresholdMs: 1500}, 1004 * time.Millisecond, true, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := planSaveFilename(&tc.cfg, tc.planDur)
+			got, ok := planSaveFilename(&tc.cfg, tc.planDur, tc.failed)
 			test.That(t, got, test.ShouldEqual, tc.wantFile)
 			test.That(t, ok, test.ShouldEqual, tc.wantOk)
 		})
