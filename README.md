@@ -27,6 +27,8 @@ We suggest a ChArUco board. The specific board we validate against: [Calib.io Ch
 
 ### Step 3: Configure the pose_tracker
 
+**If you have a depth camera (Orbbec, RealSense, etc.)**: skip the manual values below. Point the camera at the board and add the `charuco-discovery` service — it auto-detects every attribute and writes the pose_tracker config for you. See [charuco-discovery](#viamcamera-calibrationcharuco-discovery) in Reference. Requires depth; RGB-only cameras must be configured manually.
+
 Values below match the recommended board from Step 1. **Replace `camera` with your camera's name.** For a different board, replace `squares_x`, `squares_y`, `square_length_mm`, and `marker_length_mm` with values from your board's spec sheet.
 
 ```json
@@ -125,6 +127,16 @@ If `auto_applied: false`, the calibration ran but a quality gate wasn't met. The
 | `distortion`       | No       | from camera     | Override the camera's distortion coefficients (see note below).                          |
 
 > **On `distortion`**: for cameras that undistort on-device (e.g. Zivid, Ensenso, Orbbec), set to `[0, 0, 0, 0, 0]`. For cameras that publish real distortion coefficients (e.g. Realsense), leave unset.
+
+### `viam:camera-calibration:charuco-discovery`
+
+Discovery service that auto-generates a `charuco` pose_tracker config. Point your depth camera at the printed board and run discovery from app.viam.com; the result includes an **Add attribute** button that drops the config straight into your machine.
+
+| Field    | Required | Description                                       |
+| -------- | -------- | ------------------------------------------------- |
+| `camera` | Yes      | Name of the depth-capable camera to inspect from. |
+
+**Requires a depth-capable camera** (Orbbec, RealSense, etc.). On an RGB-only camera, discovery returns an error — configure the pose_tracker manually in that case.
 
 ### `viam:camera-calibration:eye_in_hand` and `viam:camera-calibration:eye_to_hand`
 
